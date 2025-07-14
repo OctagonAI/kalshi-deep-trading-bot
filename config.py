@@ -44,7 +44,7 @@ class BotConfig(BaseSettings):
     
     # Bot settings
     dry_run: bool = Field(default=True, description="Run in dry-run mode")
-    max_markets: int = Field(default=500, description="Maximum number of markets to process")
+    max_markets: int = Field(default=50, description="Maximum number of events to process")
     max_bet_amount: float = Field(default=100.0, description="Maximum bet amount per market")
     
     def __init__(self, **data):

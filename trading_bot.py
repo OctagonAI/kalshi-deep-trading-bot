@@ -51,12 +51,12 @@ class SimpleTradingBot:
         
         self.console.print(f"\n[{env_color}]Environment: {env_name}[/{env_color}]")
         self.console.print(f"[blue]Mode: {mode}[/blue]")
-        self.console.print(f"[blue]Max markets: {self.config.max_markets}[/blue]")
+        self.console.print(f"[blue]Max events: {self.config.max_markets}[/blue]")
         self.console.print(f"[blue]Max bet amount: ${self.config.max_bet_amount}[/blue]\n")
     
-    async def get_active_markets(self) -> List[Dict[str, Any]]:
-        """Get active markets sorted by volume."""
-        self.console.print("[bold]Step 1: Fetching active markets...[/bold]")
+    async def get_top_events(self) -> List[Dict[str, Any]]:
+        """Get top events sorted by volume."""
+        self.console.print("[bold]Step 1: Fetching top events...[/bold]")
         
         with Progress(
             SpinnerColumn(),
@@ -64,53 +64,82 @@ class SimpleTradingBot:
             console=self.console,
             transient=True,
         ) as progress:
-            task = progress.add_task("Fetching markets...", total=None)
+            task = progress.add_task("Fetching events...", total=None)
             
             try:
-                markets = await self.kalshi_client.get_markets()
+                events = await self.kalshi_client.get_events(limit=self.config.max_markets)
                 
-                # Filter for active markets and sort by volume
-                active_markets = [
-                    market for market in markets 
-                    if market.get('status') == 'active'
-                ]
+                self.console.print(f"[green]✓ Found {len(events)} events[/green]")
                 
-                # Sort by volume (descending)
-                active_markets.sort(
-                    key=lambda x: x.get('volume', 0), 
-                    reverse=True
-                )
-                
-                # Limit to max_markets
-                limited_markets = active_markets[:self.config.max_markets]
-                
-                self.console.print(f"[green]✓ Found {len(limited_markets)} active markets[/green]")
-                
-                # Show top 10 markets
-                table = Table(title="Top 10 Markets by Volume")
-                table.add_column("Ticker", style="cyan")
+                # Show top 10 events
+                table = Table(title="Top 10 Events by Volume")
+                table.add_column("Event Ticker", style="cyan")
                 table.add_column("Title", style="yellow")
                 table.add_column("Volume", style="magenta", justify="right")
-                table.add_column("Status", style="green")
+                table.add_column("Category", style="green")
                 
-                for market in limited_markets[:10]:
+                for event in events[:10]:
                     table.add_row(
-                        market.get('ticker', 'N/A'),
-                        market.get('title', 'N/A')[:50] + "...",
-                        str(market.get('volume', 0)),
-                        market.get('status', 'N/A')
+                        event.get('event_ticker', 'N/A'),
+                        event.get('title', 'N/A')[:50] + ("..." if len(event.get('title', '')) > 50 else ""),
+                        str(event.get('volume', 0)),
+                        event.get('category', 'N/A')
                     )
                 
                 self.console.print(table)
-                return limited_markets
+                return events
                 
             except Exception as e:
-                self.console.print(f"[red]Error fetching markets: {e}[/red]")
+                self.console.print(f"[red]Error fetching events: {e}[/red]")
                 return []
     
-    async def research_markets(self, markets: List[Dict[str, Any]]) -> Dict[str, str]:
-        """Research each market using Octagon Deep Research."""
-        self.console.print(f"\n[bold]Step 2: Researching {len(markets)} markets...[/bold]")
+    async def get_markets_for_events(self, events: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        """Get all markets for each event."""
+        self.console.print(f"\n[bold]Step 2: Fetching markets for {len(events)} events...[/bold]")
+        
+        event_markets = {}
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+        ) as progress:
+            task = progress.add_task("Fetching markets...", total=len(events))
+            
+            for event in events:
+                event_ticker = event.get('event_ticker', '')
+                if not event_ticker:
+                    progress.update(task, advance=1)
+                    continue
+                
+                try:
+                    markets = await self.kalshi_client.get_markets_for_event(event_ticker)
+                    
+                    if markets:
+                        event_markets[event_ticker] = {
+                            'event': event,
+                            'markets': markets
+                        }
+                        self.console.print(f"[green]✓ Found {len(markets)} markets for {event_ticker}[/green]")
+                    else:
+                        self.console.print(f"[yellow]⚠ No markets found for {event_ticker}[/yellow]")
+                    
+                    progress.update(task, advance=1)
+                    
+                except Exception as e:
+                    self.console.print(f"[red]✗ Failed to get markets for {event_ticker}: {e}[/red]")
+                    progress.update(task, advance=1)
+                
+                # Brief pause between requests
+                await asyncio.sleep(0.1)
+        
+        total_markets = sum(len(data['markets']) for data in event_markets.values())
+        self.console.print(f"[green]✓ Found {total_markets} total markets across {len(event_markets)} events[/green]")
+        return event_markets
+    
+    async def research_events(self, event_markets: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
+        """Research each event and its markets using Octagon Deep Research."""
+        self.console.print(f"\n[bold]Step 3: Researching {len(event_markets)} events...[/bold]")
         
         research_results = {}
         
@@ -119,32 +148,33 @@ class SimpleTradingBot:
             TextColumn("[progress.description]{task.description}"),
             console=self.console,
         ) as progress:
-            task = progress.add_task("Researching markets...", total=len(markets))
+            task = progress.add_task("Researching events...", total=len(event_markets))
             
-            # Research markets in batches to avoid rate limits
-            batch_size = 5
-            for i in range(0, len(markets), batch_size):
-                batch = markets[i:i + batch_size]
+            # Research events in batches to avoid rate limits
+            batch_size = 3
+            event_items = list(event_markets.items())
+            
+            for i in range(0, len(event_items), batch_size):
+                batch = event_items[i:i + batch_size]
                 
                 # Research batch in parallel
                 tasks = []
-                for market in batch:
-                    ticker = market.get('ticker', '')
-                    title = market.get('title', '')
-                    if ticker and title:
-                        tasks.append(self.research_client.research_market(title, ticker))
+                for event_ticker, data in batch:
+                    event = data['event']
+                    markets = data['markets']
+                    if event and markets:
+                        tasks.append(self.research_client.research_event(event, markets))
                 
                 try:
                     results = await asyncio.gather(*tasks, return_exceptions=True)
                     
-                    for market, result in zip(batch, results):
-                        ticker = market.get('ticker', '')
+                    for (event_ticker, _), result in zip(batch, results):
                         if not isinstance(result, Exception):
-                            research_results[ticker] = result
+                            research_results[event_ticker] = result
                             progress.update(task, advance=1)
-                            self.console.print(f"[green]✓ Researched {ticker}[/green]")
+                            self.console.print(f"[green]✓ Researched {event_ticker}[/green]")
                         else:
-                            self.console.print(f"[red]✗ Failed to research {ticker}: {result}[/red]")
+                            self.console.print(f"[red]✗ Failed to research {event_ticker}: {result}[/red]")
                             progress.update(task, advance=1)
                 
                 except Exception as e:
@@ -154,50 +184,59 @@ class SimpleTradingBot:
                 # Brief pause between batches
                 await asyncio.sleep(1)
         
-        self.console.print(f"[green]✓ Completed research on {len(research_results)} markets[/green]")
+        self.console.print(f"[green]✓ Completed research on {len(research_results)} events[/green]")
         return research_results
     
-    async def get_betting_decisions(self, markets: List[Dict[str, Any]], 
+    async def get_betting_decisions(self, event_markets: Dict[str, Dict[str, Any]], 
                                    research_results: Dict[str, str]) -> MarketAnalysis:
         """Use OpenAI to make structured betting decisions."""
-        self.console.print(f"\n[bold]Step 3: Generating betting decisions...[/bold]")
+        self.console.print(f"\n[bold]Step 4: Generating betting decisions...[/bold]")
         
-        # Prepare market and research data for OpenAI
-        market_data = []
-        for market in markets:
-            ticker = market.get('ticker', '')
-            if ticker in research_results:
-                market_data.append({
-                    'ticker': ticker,
-                    'title': market.get('title', ''),
-                    'volume': market.get('volume', 0),
-                    'yes_price': market.get('yes_bid', 0),
-                    'no_price': market.get('no_bid', 0),
-                    'research': research_results[ticker]
+        # Prepare event and research data for OpenAI
+        event_data = []
+        for event_ticker, data in event_markets.items():
+            if event_ticker in research_results:
+                event_info = data['event']
+                markets = data['markets']
+                
+                event_data.append({
+                    'event_ticker': event_ticker,
+                    'event_title': event_info.get('title', ''),
+                    'event_category': event_info.get('category', ''),
+                    'event_volume': event_info.get('volume', 0),
+                    'markets': [
+                        {
+                            'ticker': market.get('ticker', ''),
+                            'title': market.get('title', ''),
+                            'volume': market.get('volume', 0)
+                        }
+                        for market in markets
+                    ],
+                    'research': research_results[event_ticker]
                 })
         
         # Create prompt for OpenAI
         prompt = f"""
-        You are a professional prediction market trader. Based on the research provided, 
-        make betting decisions for each market.
+        You are a professional prediction market trader. Based on the research provided for each event, 
+        make betting decisions for the individual markets.
         
-        Available budget: ${self.config.max_bet_amount * len(market_data)}
+        Available budget: ${self.config.max_bet_amount * sum(len(data['markets']) for data in event_data)}
         Max bet per market: ${self.config.max_bet_amount}
         
-        Markets and Research:
-        {json.dumps(market_data, indent=2)}
+        Events and Research:
+        {json.dumps(event_data, indent=2)}
         
         For each market, decide:
         1. Action: "buy_yes", "buy_no", or "skip"
         2. Confidence: 0-1 (only bet if confidence > 0.6)
         3. Amount: How much to bet (max ${self.config.max_bet_amount})
-        4. Reasoning: Brief explanation
+        4. Reasoning: Brief explanation based on the research
         
         Focus on:
-        - High-volume markets with good research insights
-        - Clear directional signals from the research
+        - Markets with clear research insights and probability predictions
+        - High-volume events with good research confidence
         - Risk management (don't bet on everything)
-        - Diversification across different market types
+        - Consider correlations within mutually exclusive events
         
         Return your analysis in the specified JSON format.
         """
@@ -265,7 +304,7 @@ class SimpleTradingBot:
     
     async def place_bets(self, analysis: MarketAnalysis):
         """Place bets based on the analysis."""
-        self.console.print(f"\n[bold]Step 4: Placing bets...[/bold]")
+        self.console.print(f"\n[bold]Step 5: Placing bets...[/bold]")
         
         if not analysis.decisions:
             self.console.print("[yellow]No betting decisions to execute[/yellow]")
@@ -336,17 +375,22 @@ class SimpleTradingBot:
             await self.initialize()
             
             # Execute the main workflow
-            markets = await self.get_active_markets()
-            if not markets:
+            events = await self.get_top_events()
+            if not events:
+                self.console.print("[red]No events found. Exiting.[/red]")
+                return
+            
+            event_markets = await self.get_markets_for_events(events)
+            if not event_markets:
                 self.console.print("[red]No markets found. Exiting.[/red]")
                 return
             
-            research_results = await self.research_markets(markets)
+            research_results = await self.research_events(event_markets)
             if not research_results:
                 self.console.print("[red]No research results. Exiting.[/red]")
                 return
             
-            analysis = await self.get_betting_decisions(markets, research_results)
+            analysis = await self.get_betting_decisions(event_markets, research_results)
             await self.place_bets(analysis)
             
             self.console.print("\n[bold green]Bot execution completed![/bold green]")

@@ -38,40 +38,102 @@ class KalshiClient:
         # In the real implementation, you'd do login here
         logger.info(f"Connected to Kalshi API at {self.base_url}")
         
-    async def get_markets(self) -> List[Dict[str, Any]]:
-        """Get all active markets."""
+    async def get_events(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get top events sorted by volume."""
+        try:
+            headers = await self._get_headers("GET", "/trade-api/v2/events")
+            response = await self.client.get(
+                "/trade-api/v2/events",
+                headers=headers,
+                params={"limit": limit, "status": "open"}
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            events = data.get("events", [])
+            
+            # Sort by volume (descending) and return simplified format
+            events.sort(key=lambda x: x.get("volume", 0), reverse=True)
+            
+            simple_events = []
+            for event in events:
+                simple_events.append({
+                    "event_ticker": event.get("event_ticker", ""),
+                    "title": event.get("title", ""),
+                    "subtitle": event.get("subtitle", ""),
+                    "volume": event.get("volume", 0),
+                    "category": event.get("category", ""),
+                    "mutually_exclusive": event.get("mutually_exclusive", False),
+                })
+            
+            logger.info(f"Retrieved {len(simple_events)} events")
+            return simple_events
+            
+        except Exception as e:
+            logger.error(f"Error getting events: {e}")
+            return []
+    
+    async def get_markets_for_event(self, event_ticker: str) -> List[Dict[str, Any]]:
+        """Get all markets for a specific event."""
         try:
             headers = await self._get_headers("GET", "/trade-api/v2/markets")
             response = await self.client.get(
                 "/trade-api/v2/markets",
                 headers=headers,
-                params={"status": "open"}
+                params={"event_ticker": event_ticker, "status": "open"}
             )
             response.raise_for_status()
             
             data = response.json()
             markets = data.get("markets", [])
             
-            # Transform to simpler format
+            # Return markets without odds for research
             simple_markets = []
             for market in markets:
                 simple_markets.append({
                     "ticker": market.get("ticker", ""),
                     "title": market.get("title", ""),
-                    "status": market.get("status", ""),
+                    "subtitle": market.get("subtitle", ""),
                     "volume": market.get("volume", 0),
-                    "yes_bid": market.get("yes_bid", 0),
-                    "no_bid": market.get("no_bid", 0),
-                    "yes_ask": market.get("yes_ask", 0),
-                    "no_ask": market.get("no_ask", 0),
+                    "open_time": market.get("open_time", ""),
+                    "close_time": market.get("close_time", ""),
+                    # Note: NOT including yes_bid, no_bid, yes_ask, no_ask for research
                 })
             
-            logger.info(f"Retrieved {len(simple_markets)} markets")
+            logger.info(f"Retrieved {len(simple_markets)} markets for event {event_ticker}")
             return simple_markets
             
         except Exception as e:
-            logger.error(f"Error getting markets: {e}")
+            logger.error(f"Error getting markets for event {event_ticker}: {e}")
             return []
+    
+    async def get_market_with_odds(self, ticker: str) -> Dict[str, Any]:
+        """Get a specific market with current odds for trading."""
+        try:
+            headers = await self._get_headers("GET", f"/trade-api/v2/markets/{ticker}")
+            response = await self.client.get(
+                f"/trade-api/v2/markets/{ticker}",
+                headers=headers
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            market = data.get("market", {})
+            
+            return {
+                "ticker": market.get("ticker", ""),
+                "title": market.get("title", ""),
+                "yes_bid": market.get("yes_bid", 0),
+                "no_bid": market.get("no_bid", 0),
+                "yes_ask": market.get("yes_ask", 0),
+                "no_ask": market.get("no_ask", 0),
+                "volume": market.get("volume", 0),
+                "status": market.get("status", ""),
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting market {ticker}: {e}")
+            return {}
     
     async def place_order(self, ticker: str, side: str, amount: float) -> Dict[str, Any]:
         """Place a simple order."""
