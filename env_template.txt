@@ -22,7 +22,7 @@ KALSHI_USE_DEMO=true
 
 # Octagon API credentials
 OCTAGON_API_KEY=your_octagon_api_key_here
-OCTAGON_BASE_URL=https://api.octagon.ai
+OCTAGON_BASE_URL=https://api-gateway.octagonagents.com/v1
 
 # =============================================================================
 # OPENAI API CONFIGURATION

@@ -1,4 +1,4 @@
-# Simple Kalshi Trading Bot
+# Kalshi Deep Trading Bot
 
 A straightforward trading bot for Kalshi prediction markets that uses Octagon Deep Research for market analysis and OpenAI for structured betting decisions.
 
