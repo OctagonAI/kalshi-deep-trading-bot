@@ -58,7 +58,7 @@ class SimpleTradingBot:
         self.console.print(f"[blue]Max bet amount: ${self.config.max_bet_amount}[/blue]\n")
     
     async def get_top_events(self) -> List[Dict[str, Any]]:
-        """Get top events sorted by volume."""
+        """Get top events sorted by liquidity (popularity indicator)."""
         self.console.print("[bold]Step 1: Fetching top events...[/bold]")
         
         with Progress(
@@ -75,17 +75,17 @@ class SimpleTradingBot:
                 self.console.print(f"[green]✓ Found {len(events)} events[/green]")
                 
                 # Show top 10 events
-                table = Table(title="Top 10 Events by Volume")
+                table = Table(title="Top 10 Events by Liquidity")
                 table.add_column("Event Ticker", style="cyan")
                 table.add_column("Title", style="yellow")
-                table.add_column("Volume", style="magenta", justify="right")
+                table.add_column("Liquidity", style="magenta", justify="right")
                 table.add_column("Category", style="green")
                 
                 for event in events[:10]:
                     table.add_row(
                         event.get('event_ticker', 'N/A'),
                         event.get('title', 'N/A')[:50] + ("..." if len(event.get('title', '')) > 50 else ""),
-                        str(event.get('volume', 0)),
+                        f"{event.get('liquidity', 0):,}",
                         event.get('category', 'N/A')
                     )
                 

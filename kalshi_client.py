@@ -39,35 +39,47 @@ class KalshiClient:
         logger.info(f"Connected to Kalshi API at {self.base_url}")
         
     async def get_events(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get top events sorted by volume."""
+        """Get top events sorted by liquidity (popularity indicator)."""
         try:
             headers = await self._get_headers("GET", "/trade-api/v2/events")
             response = await self.client.get(
                 "/trade-api/v2/events",
                 headers=headers,
-                params={"limit": limit, "status": "open"}
+                params={"limit": limit, "status": "open", "with_nested_markets": "true"}
             )
             response.raise_for_status()
             
             data = response.json()
             events = data.get("events", [])
             
-            # Sort by volume (descending) and return simplified format
-            events.sort(key=lambda x: x.get("volume", 0), reverse=True)
-            
-            simple_events = []
+            # Calculate total liquidity and volume for each event from its markets
+            enriched_events = []
             for event in events:
-                simple_events.append({
+                total_liquidity = 0
+                total_volume = 0
+                total_open_interest = 0
+                
+                for market in event.get("markets", []):
+                    total_liquidity += market.get("liquidity", 0)
+                    total_volume += market.get("volume", 0)
+                    total_open_interest += market.get("open_interest", 0)
+                
+                enriched_events.append({
                     "event_ticker": event.get("event_ticker", ""),
                     "title": event.get("title", ""),
-                    "subtitle": event.get("subtitle", ""),
-                    "volume": event.get("volume", 0),
+                    "subtitle": event.get("sub_title", ""),
+                    "volume": total_volume,
+                    "liquidity": total_liquidity,
+                    "open_interest": total_open_interest,
                     "category": event.get("category", ""),
                     "mutually_exclusive": event.get("mutually_exclusive", False),
                 })
             
-            logger.info(f"Retrieved {len(simple_events)} events")
-            return simple_events
+            # Sort by liquidity (descending) as it's the best popularity indicator
+            enriched_events.sort(key=lambda x: x.get("liquidity", 0), reverse=True)
+            
+            logger.info(f"Retrieved {len(enriched_events)} events")
+            return enriched_events
             
         except Exception as e:
             logger.error(f"Error getting events: {e}")

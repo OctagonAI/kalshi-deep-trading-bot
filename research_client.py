@@ -15,7 +15,8 @@ class OctagonClient:
         self.config = config
         self.client = openai.AsyncOpenAI(
             api_key=config.api_key,
-            base_url=config.base_url
+            base_url=config.base_url,
+            timeout=1800.0  # 30 minutes timeout for deep research
         )
     
     async def research_event(self, event: Dict[str, Any], markets: List[Dict[str, Any]]) -> str:
@@ -72,6 +73,9 @@ class OctagonClient:
             Format your response clearly with market tickers and probability predictions.
             """
             
+            event_ticker = event.get('event_ticker', 'UNKNOWN')
+            logger.info(f"Starting deep research for event {event_ticker} (this may take several minutes)...")
+            
             response = await self.client.chat.completions.create(
                 model="octagon-deep-research-agent",
                 messages=[
@@ -80,6 +84,7 @@ class OctagonClient:
                 temperature=0.1
             )
             
+            logger.info(f"Completed deep research for event {event_ticker}")
             return response.choices[0].message.content
             
         except Exception as e:
