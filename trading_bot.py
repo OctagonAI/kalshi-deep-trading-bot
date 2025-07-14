@@ -4,6 +4,8 @@ Simple Kalshi trading bot with Octagon research and OpenAI decision making.
 import asyncio
 import json
 import re
+import sys
+import argparse
 from typing import List, Dict, Any, Optional
 from loguru import logger
 from rich.console import Console
@@ -495,7 +497,47 @@ async def main():
 
 def cli():
     """Command line interface entry point."""
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(
+        description="Simple Kalshi trading bot with Octagon research and OpenAI decision making",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  uv run trading-bot                    # Run bot with default settings
+  uv run trading-bot --help            # Show this help message
+  
+Configuration:
+  Create a .env file with your API keys:
+    KALSHI_API_KEY=your_kalshi_api_key
+    KALSHI_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----"
+    OCTAGON_API_KEY=your_octagon_api_key
+    OPENAI_API_KEY=your_openai_api_key
+    
+  Optional settings:
+    KALSHI_USE_DEMO=true               # Use demo environment (default: true)
+    DRY_RUN=true                       # Simulate trades (default: true)
+    MAX_MARKETS=50                     # Max events to process (default: 50)
+    MAX_BET_AMOUNT=25.0                # Max bet per market (default: 25.0)
+        """
+    )
+    
+    parser.add_argument(
+        '--version',
+        action='version',
+        version='Kalshi Trading Bot 1.0.0'
+    )
+    
+    # Parse arguments
+    args = parser.parse_args()
+    
+    # Try to load config and run bot
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        console = Console()
+        console.print(f"[red]Error: {e}[/red]")
+        console.print("\n[yellow]Please check your .env file configuration.[/yellow]")
+        console.print("[yellow]Run with --help for more information.[/yellow]")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

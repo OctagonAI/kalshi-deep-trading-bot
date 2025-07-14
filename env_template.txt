@@ -7,7 +7,11 @@
 
 # Kalshi API credentials
 KALSHI_API_KEY=your_kalshi_api_key_here
-KALSHI_PRIVATE_KEY=your_kalshi_private_key_here
+
+# Kalshi Private Key (PEM format) - IMPORTANT: Include the full PEM key with \n for line breaks
+# Format: KALSHI_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----"
+# OR use a file path: KALSHI_PRIVATE_KEY_FILE=/path/to/your/private_key.pem
+KALSHI_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nyour_private_key_content_here\n-----END RSA PRIVATE KEY-----"
 
 # Environment (use demo for testing)
 KALSHI_USE_DEMO=true
@@ -49,16 +53,28 @@ MAX_BET_AMOUNT=25.0
 #    - For demo: use demo.kalshi.co with separate demo credentials
 #    - For production: use api.kalshi.co with production credentials
 
-# 2. Get Octagon API key:
+# 2. Format your private key properly:
+#    OPTION A: In .env file with \n (recommended for testing)
+#    KALSHI_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----"
+#    
+#    OPTION B: Use a separate file (recommended for production)
+#    KALSHI_PRIVATE_KEY_FILE=kalshi_private_key.pem
+#    
+#    OPTION C: Multi-line format in .env (may not work with all parsers)
+#    KALSHI_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
+#    MIIEpAIBAAKCAQEA...
+#    -----END RSA PRIVATE KEY-----"
+
+# 3. Get Octagon API key:
 #    - Contact Octagon team for API access
 #    - Replace OCTAGON_API_KEY with your actual key
 
-# 3. Get OpenAI API key:
+# 4. Get OpenAI API key:
 #    - Go to https://platform.openai.com/api-keys
 #    - Create a new API key
 #    - Ensure you have access to GPT-4 models
 
-# 4. Test setup:
+# 5. Test setup:
 #    - Start with DRY_RUN=true and KALSHI_USE_DEMO=true
 #    - Test with small MAX_MARKETS (10-20) first
 #    - Only use production after thorough testing
