@@ -56,6 +56,7 @@ class SimpleTradingBot:
         self.console.print(f"[blue]Mode: {mode}[/blue]")
         self.console.print(f"[blue]Max events to analyze: {self.config.max_events_to_analyze}[/blue]")
         self.console.print(f"[blue]Research batch size: {self.config.research_batch_size}[/blue]")
+        self.console.print(f"[blue]Skip existing positions: {self.config.skip_existing_positions}[/blue]")
         self.console.print(f"[blue]Max bet amount: ${self.config.max_bet_amount}[/blue]\n")
     
     async def get_top_events(self) -> List[Dict[str, Any]]:
@@ -416,6 +417,14 @@ class SimpleTradingBot:
             
             for decision in actionable_decisions:
                 try:
+                    # Check if we already have a position in this market (if enabled)
+                    if not self.config.dry_run and self.config.skip_existing_positions:
+                        has_position = await self.kalshi_client.has_position_in_market(decision.ticker)
+                        if has_position:
+                            self.console.print(f"[yellow]⚠ Skipping {decision.ticker}: Already have position in this market[/yellow]")
+                            progress.update(task, advance=1)
+                            continue
+                    
                     if self.config.dry_run:
                         # Simulate bet placement
                         self.console.print(f"[yellow]DRY RUN: Would place {decision.action} bet on {decision.ticker} for ${decision.amount:.2f}[/yellow]")

@@ -39,29 +39,23 @@ class KalshiClient:
         logger.info(f"Connected to Kalshi API at {self.base_url}")
         
     async def get_events(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get top events sorted by liquidity (popularity indicator)."""
+        """Get top events sorted by 24-hour volume."""
         try:
-            headers = await self._get_headers("GET", "/trade-api/v2/events")
-            response = await self.client.get(
-                "/trade-api/v2/events",
-                headers=headers,
-                params={"limit": limit, "status": "open", "with_nested_markets": "true"}
-            )
-            response.raise_for_status()
+            # First, fetch ALL events from the platform using pagination
+            all_events = await self._fetch_all_events()
             
-            data = response.json()
-            events = data.get("events", [])
-            
-            # Calculate total liquidity and volume for each event from its markets
+            # Calculate total volume_24h for each event from its markets
             enriched_events = []
-            for event in events:
+            for event in all_events:
                 total_liquidity = 0
                 total_volume = 0
+                total_volume_24h = 0
                 total_open_interest = 0
                 
                 for market in event.get("markets", []):
                     total_liquidity += market.get("liquidity", 0)
                     total_volume += market.get("volume", 0)
+                    total_volume_24h += market.get("volume_24h", 0)
                     total_open_interest += market.get("open_interest", 0)
                 
                 enriched_events.append({
@@ -69,21 +63,74 @@ class KalshiClient:
                     "title": event.get("title", ""),
                     "subtitle": event.get("sub_title", ""),
                     "volume": total_volume,
+                    "volume_24h": total_volume_24h,
                     "liquidity": total_liquidity,
                     "open_interest": total_open_interest,
                     "category": event.get("category", ""),
                     "mutually_exclusive": event.get("mutually_exclusive", False),
                 })
             
-            # Sort by liquidity (descending) as it's the best popularity indicator
-            enriched_events.sort(key=lambda x: x.get("liquidity", 0), reverse=True)
+            # Sort by volume_24h (descending) for true popularity ranking
+            enriched_events.sort(key=lambda x: x.get("volume_24h", 0), reverse=True)
             
-            logger.info(f"Retrieved {len(enriched_events)} events")
-            return enriched_events
+            # Return only the top N events as requested
+            top_events = enriched_events[:limit]
+            
+            logger.info(f"Retrieved {len(all_events)} total events, returning top {len(top_events)} by 24h volume")
+            return top_events
             
         except Exception as e:
             logger.error(f"Error getting events: {e}")
             return []
+    
+    async def _fetch_all_events(self) -> List[Dict[str, Any]]:
+        """Fetch all events from the platform using pagination."""
+        all_events = []
+        cursor = None
+        page = 1
+        
+        while True:
+            try:
+                headers = await self._get_headers("GET", "/trade-api/v2/events")
+                params = {
+                    "limit": 100,  # Maximum events per page
+                    "status": "open",
+                    "with_nested_markets": "true"
+                }
+                
+                if cursor:
+                    params["cursor"] = cursor
+                
+                logger.info(f"Fetching events page {page}...")
+                response = await self.client.get(
+                    "/trade-api/v2/events",
+                    headers=headers,
+                    params=params
+                )
+                response.raise_for_status()
+                
+                data = response.json()
+                events = data.get("events", [])
+                
+                if not events:
+                    break
+                
+                all_events.extend(events)
+                logger.info(f"Page {page}: {len(events)} events (total: {len(all_events)})")
+                
+                # Check if there's a next page
+                cursor = data.get("cursor")
+                if not cursor:
+                    break
+                
+                page += 1
+                
+            except Exception as e:
+                logger.error(f"Error fetching events page {page}: {e}")
+                break
+        
+        logger.info(f"Fetched {len(all_events)} total events from {page} pages")
+        return all_events
     
     async def get_markets_for_event(self, event_ticker: str) -> List[Dict[str, Any]]:
         """Get all markets for a specific event."""
@@ -147,6 +194,47 @@ class KalshiClient:
             logger.error(f"Error getting market {ticker}: {e}")
             return {}
     
+    async def get_user_positions(self) -> List[Dict[str, Any]]:
+        """Get all user positions."""
+        try:
+            headers = await self._get_headers("GET", "/trade-api/v2/portfolio/positions")
+            response = await self.client.get(
+                "/trade-api/v2/portfolio/positions",
+                headers=headers
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            positions = data.get("positions", [])
+            
+            logger.info(f"Retrieved {len(positions)} positions")
+            return positions
+            
+        except Exception as e:
+            logger.error(f"Error getting user positions: {e}")
+            return []
+    
+    async def has_position_in_market(self, ticker: str) -> bool:
+        """Check if user already has a position in the specified market."""
+        try:
+            positions = await self.get_user_positions()
+            
+            for position in positions:
+                if position.get("ticker") == ticker:
+                    # Check if position has any shares (either yes or no)
+                    yes_position = position.get("yes_position", 0)
+                    no_position = position.get("no_position", 0)
+                    
+                    if yes_position != 0 or no_position != 0:
+                        logger.info(f"Found existing position in {ticker}: YES={yes_position}, NO={no_position}")
+                        return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking position for {ticker}: {e}")
+            return False  # If we can't check, assume no position to be safe
+
     async def place_order(self, ticker: str, side: str, amount: float) -> Dict[str, Any]:
         """Place a simple order."""
         try:

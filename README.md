@@ -87,6 +87,7 @@ MAX_EVENTS_TO_ANALYZE=50      # Number of top events to analyze by 24h volume
 MAX_MARKETS=50                # Maximum events to process (deprecated, use MAX_EVENTS_TO_ANALYZE)
 MAX_BET_AMOUNT=25.0           # Maximum bet per market
 RESEARCH_BATCH_SIZE=10        # Number of parallel deep research requests
+SKIP_EXISTING_POSITIONS=true # Skip betting on markets where we already have positions
 
 # API Keys
 KALSHI_API_KEY=your_key
@@ -99,6 +100,7 @@ OPENAI_API_KEY=your_key
 
 - **MAX_EVENTS_TO_ANALYZE**: Controls how many of the top events (sorted by 24h volume) to analyze. The bot fetches ALL events from Kalshi, sorts them by trading volume, and processes only the top N most active events.
 - **RESEARCH_BATCH_SIZE**: Controls how many deep research requests are sent in parallel. Higher values process faster but may hit rate limits. Recommended range: 1-20.
+- **SKIP_EXISTING_POSITIONS**: When enabled (default), the bot will skip betting on markets where you already have positions to avoid duplicate trades.
 
 ## Recommended Testing Flow
 
