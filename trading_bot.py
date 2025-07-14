@@ -129,11 +129,15 @@ class TradingBot:
         
         try:
             # Initialize clients
+            # Get active credentials and URLs based on mode
+            api_key, private_key = self.config.kalshi.get_active_credentials()
+            base_url, websocket_url = self.config.kalshi.get_active_urls()
+            
             self.kalshi_client = KalshiClient(
-                self.config.kalshi.api_key,
-                self.config.kalshi.private_key,
-                self.config.kalshi.base_url,
-                self.config.kalshi.websocket_url,
+                api_key,
+                private_key,
+                base_url,
+                websocket_url,
                 self.config.kalshi.rate_limit_requests_per_second
             )
             
@@ -475,13 +479,18 @@ class TradingBot:
     
     def _display_startup_info(self):
         """Display bot startup information"""
+        # Get environment info
+        kalshi_mode = "DEMO" if self.config.kalshi.use_demo else "PRODUCTION"
+        trading_mode = "DRY RUN" if self.config.dry_run else "LIVE TRADING"
+        
         startup_panel = Panel(
             f"""
 🤖 Kalshi Trading Bot with Octagon Deep Research
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Configuration:
-• Mode: {'DRY RUN' if self.config.dry_run else 'LIVE TRADING'}
+• Trading Mode: {trading_mode}
+• Kalshi Environment: {kalshi_mode}
 • Strategies: {', '.join(self.config.trading.enabled_strategies)}
 • Max Position Size: {self.config.risk_management.max_position_size:.1%}
 • Max Daily Loss: {self.config.risk_management.max_daily_loss:.1%}
@@ -495,7 +504,7 @@ Risk Management:
 Started at: {self.bot_start_time}
             """,
             title="Bot Status",
-            border_style="green"
+            border_style="green" if kalshi_mode == "DEMO" else "yellow"
         )
         
         self.console.print(startup_panel)

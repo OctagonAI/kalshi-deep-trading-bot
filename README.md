@@ -55,26 +55,39 @@ A sophisticated automated trading bot for Kalshi prediction markets that leverag
    pip install -r requirements.txt
    ```
 
-3. **Set up environment variables**
+3. **Set up Kalshi accounts**
+   - **Demo Account**: Create account at https://demo.kalshi.co (for testing)
+   - **Production Account**: Create account at https://kalshi.com (for live trading)
+   - Generate API keys for both accounts separately
+
+4. **Set up environment variables**
    Create a `.env` file based on the template:
    ```bash
-   cp .env.template .env
+   cp env_template.txt .env
    ```
 
-4. **Configure API keys**
+5. **Configure API keys**
    Edit `.env` and add your API credentials:
    ```bash
-   # Kalshi API Configuration
-   KALSHI_API_KEY=your_kalshi_api_key_here
+   # Choose environment (start with demo for testing)
+   KALSHI_USE_DEMO=true
+   
+   # Demo Credentials (for testing with mock funds)
+   KALSHI_DEMO_API_KEY=your_demo_key_id_here
+   KALSHI_DEMO_PRIVATE_KEY=your_demo_private_key_here
+   
+   # Production Credentials (for live trading)
+   KALSHI_API_KEY=your_kalshi_key_id_here
    KALSHI_PRIVATE_KEY=your_kalshi_private_key_here
    
    # Octagon Deep Research API Configuration
    OCTAGON_API_KEY=your_octagon_api_key_here
    ```
    
-   **Important**: For Kalshi API, you need both:
-   - `KALSHI_API_KEY`: The Key ID from your Kalshi account
-   - `KALSHI_PRIVATE_KEY`: The RSA private key in PEM format
+   **Important**: 
+   - **Demo Mode**: Use `KALSHI_USE_DEMO=true` for testing with mock funds
+   - **Production Mode**: Use `KALSHI_USE_DEMO=false` for live trading
+   - Credentials are separate between demo and production environments
 
 ## ⚙️ Configuration
 
@@ -82,8 +95,11 @@ A sophisticated automated trading bot for Kalshi prediction markets that leverag
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `KALSHI_API_KEY` | Kalshi API key (Key ID) | Required |
-| `KALSHI_PRIVATE_KEY` | Kalshi RSA private key (PEM format) | Required |
+| `KALSHI_USE_DEMO` | Use demo environment instead of production | `true` |
+| `KALSHI_API_KEY` | Kalshi production API key (Key ID) | Required |
+| `KALSHI_PRIVATE_KEY` | Kalshi production RSA private key (PEM format) | Required |
+| `KALSHI_DEMO_API_KEY` | Kalshi demo API key (Key ID) | Required for demo |
+| `KALSHI_DEMO_PRIVATE_KEY` | Kalshi demo RSA private key (PEM format) | Required for demo |
 | `OCTAGON_API_KEY` | Octagon Deep Research API key | Required |
 | `DRY_RUN` | Run in simulation mode | `true` |
 | `MAX_POSITION_SIZE` | Maximum position size (% of portfolio) | `0.1` |
@@ -114,6 +130,10 @@ MARKET_CATEGORIES=politics,economics,technology,sports,entertainment
    ```bash
    python trading_bot.py
    ```
+   
+   The bot will display which environment it's using:
+   - **Green border**: Demo mode (safe testing)
+   - **Yellow border**: Production mode (live trading)
 
 2. **Monitor performance**
    The bot displays real-time status including:
@@ -137,18 +157,30 @@ await bot.initialize()
 await bot.run()
 ```
 
-### Dry Run Mode
+### Demo and Dry Run Modes
 
-Always start with dry run mode enabled:
+**Demo Mode**: Always start with demo mode for testing:
 ```bash
+KALSHI_USE_DEMO=true
 DRY_RUN=true
 ```
 
-This allows you to:
-- Test strategies without real money
+**Demo Mode** uses Kalshi's demo environment with mock funds:
+- Safe testing environment at https://demo.kalshi.co
+- Separate credentials from production
+- No real money at risk
+- Full API functionality
+
+**Dry Run Mode** simulates trades without executing them:
+- Test strategies without any money
 - Validate API connections
 - Monitor bot behavior
 - Analyze performance
+
+**Recommended Testing Flow**:
+1. Start with `KALSHI_USE_DEMO=true` and `DRY_RUN=true`
+2. Test with `KALSHI_USE_DEMO=true` and `DRY_RUN=false` 
+3. Go live with `KALSHI_USE_DEMO=false` and `DRY_RUN=false`
 
 ## 📊 Monitoring
 
@@ -335,6 +367,9 @@ python backtest.py --start-date 2024-01-01 --end-date 2024-12-31
    - Check API keys and private keys
    - Verify private key is in correct PEM format
    - Ensure API key (Key ID) is correct
+   - Check if using correct environment (demo vs production)
+   - Verify demo credentials are for demo.kalshi.co account
+   - Verify production credentials are for kalshi.com account
    - Verify network connectivity
    - Check rate limits
 

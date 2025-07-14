@@ -11,10 +11,25 @@ load_dotenv()
 
 class KalshiConfig(BaseModel):
     """Configuration for Kalshi API"""
+    # Production credentials
     api_key: str = Field(..., description="Kalshi API key (Key ID)")
     private_key: str = Field(..., description="Kalshi RSA private key in PEM format")
+    
+    # Demo credentials (optional)
+    demo_api_key: str = Field(default="", description="Kalshi Demo API key (Key ID)")
+    demo_private_key: str = Field(default="", description="Kalshi Demo RSA private key in PEM format")
+    
+    # Environment mode
+    use_demo: bool = Field(default=False, description="Use demo environment instead of production")
+    
+    # URLs (will be set based on mode)
     base_url: str = Field(default="https://api.elections.kalshi.com", description="Base API URL")
     websocket_url: str = Field(default="wss://api.elections.kalshi.com/ws/v1", description="WebSocket URL")
+    
+    # Demo URLs
+    demo_base_url: str = Field(default="https://demo-api.kalshi.co", description="Demo API URL")
+    demo_websocket_url: str = Field(default="wss://demo-api.kalshi.co/ws/v1", description="Demo WebSocket URL")
+    
     rate_limit_requests_per_second: int = Field(default=5, description="Rate limit for API requests")
     
     @validator('api_key')
@@ -31,6 +46,28 @@ class KalshiConfig(BaseModel):
         if not v.strip().startswith('-----BEGIN') or not v.strip().endswith('-----'):
             raise ValueError("Private key must be in PEM format")
         return v
+    
+    @validator('demo_private_key')
+    def validate_demo_private_key(cls, v, values):
+        if v and not v.strip().startswith('-----BEGIN'):
+            raise ValueError("Demo private key must be in PEM format")
+        return v
+    
+    def get_active_credentials(self) -> tuple:
+        """Get the active API credentials based on the mode"""
+        if self.use_demo:
+            if not self.demo_api_key or not self.demo_private_key:
+                raise ValueError("Demo credentials are required when use_demo=True")
+            return self.demo_api_key, self.demo_private_key
+        else:
+            return self.api_key, self.private_key
+    
+    def get_active_urls(self) -> tuple:
+        """Get the active URLs based on the mode"""
+        if self.use_demo:
+            return self.demo_base_url, self.demo_websocket_url
+        else:
+            return self.base_url, self.websocket_url
 
 class OctagonConfig(BaseModel):
     """Configuration for Octagon Deep Research API"""
@@ -106,10 +143,23 @@ def load_config() -> BotConfig:
     """Load configuration from environment variables"""
     return BotConfig(
         kalshi=KalshiConfig(
+            # Production credentials
             api_key=os.getenv("KALSHI_API_KEY", ""),
             private_key=os.getenv("KALSHI_PRIVATE_KEY", ""),
+            
+            # Demo credentials
+            demo_api_key=os.getenv("KALSHI_DEMO_API_KEY", ""),
+            demo_private_key=os.getenv("KALSHI_DEMO_PRIVATE_KEY", ""),
+            
+            # Environment mode
+            use_demo=os.getenv("KALSHI_USE_DEMO", "false").lower() == "true",
+            
+            # URLs
             base_url=os.getenv("KALSHI_BASE_URL", "https://api.elections.kalshi.com"),
             websocket_url=os.getenv("KALSHI_WS_URL", "wss://api.elections.kalshi.com/ws/v1"),
+            demo_base_url=os.getenv("KALSHI_DEMO_BASE_URL", "https://demo-api.kalshi.co"),
+            demo_websocket_url=os.getenv("KALSHI_DEMO_WS_URL", "wss://demo-api.kalshi.co/ws/v1"),
+            
             rate_limit_requests_per_second=int(os.getenv("KALSHI_RATE_LIMIT", "5"))
         ),
         octagon=OctagonConfig(
