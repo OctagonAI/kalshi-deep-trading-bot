@@ -131,7 +131,7 @@ class TradingBot:
             # Initialize clients
             self.kalshi_client = KalshiClient(
                 self.config.kalshi.api_key,
-                self.config.kalshi.api_secret,
+                self.config.kalshi.private_key,
                 self.config.kalshi.base_url,
                 self.config.kalshi.websocket_url,
                 self.config.kalshi.rate_limit_requests_per_second

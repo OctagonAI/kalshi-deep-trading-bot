@@ -66,11 +66,15 @@ A sophisticated automated trading bot for Kalshi prediction markets that leverag
    ```bash
    # Kalshi API Configuration
    KALSHI_API_KEY=your_kalshi_api_key_here
-   KALSHI_API_SECRET=your_kalshi_api_secret_here
+   KALSHI_PRIVATE_KEY=your_kalshi_private_key_here
    
    # Octagon Deep Research API Configuration
    OCTAGON_API_KEY=your_octagon_api_key_here
    ```
+   
+   **Important**: For Kalshi API, you need both:
+   - `KALSHI_API_KEY`: The Key ID from your Kalshi account
+   - `KALSHI_PRIVATE_KEY`: The RSA private key in PEM format
 
 ## ⚙️ Configuration
 
@@ -78,8 +82,8 @@ A sophisticated automated trading bot for Kalshi prediction markets that leverag
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `KALSHI_API_KEY` | Kalshi API key | Required |
-| `KALSHI_API_SECRET` | Kalshi API secret | Required |
+| `KALSHI_API_KEY` | Kalshi API key (Key ID) | Required |
+| `KALSHI_PRIVATE_KEY` | Kalshi RSA private key (PEM format) | Required |
 | `OCTAGON_API_KEY` | Octagon Deep Research API key | Required |
 | `DRY_RUN` | Run in simulation mode | `true` |
 | `MAX_POSITION_SIZE` | Maximum position size (% of portfolio) | `0.1` |
@@ -177,8 +181,8 @@ Comprehensive logging includes:
 
 ### Kalshi API
 
-The bot uses the official Kalshi API (https://docs.kalshi.com/api-reference/api_keys/get-api_keys) with:
-- API key authentication
+The bot uses the official Kalshi API (https://docs.kalshi.com/getting_started/api_keys) with:
+- RSA signature authentication using private key
 - Rate limiting (5 requests/second default)
 - WebSocket support for real-time data
 - Order management (place, cancel, modify)
@@ -282,7 +286,7 @@ Technical analysis strategy based on price deviations from moving averages.
 ## 🔒 Security
 
 ### API Security
-- HMAC signature authentication
+- RSA signature authentication for Kalshi API
 - Secure environment variable storage
 - Rate limiting and error handling
 - Request validation and sanitization
@@ -328,7 +332,9 @@ python backtest.py --start-date 2024-01-01 --end-date 2024-12-31
 ### Common Issues
 
 1. **API Connection Errors**
-   - Check API keys and secrets
+   - Check API keys and private keys
+   - Verify private key is in correct PEM format
+   - Ensure API key (Key ID) is correct
    - Verify network connectivity
    - Check rate limits
 

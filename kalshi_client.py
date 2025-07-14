@@ -7,6 +7,7 @@ import hmac
 import json
 import time
 import asyncio
+import base64
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timezone
 import httpx
@@ -15,6 +16,10 @@ from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 from dataclasses import dataclass
 from enum import Enum
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.backends import default_backend
+from cryptography.exceptions import InvalidSignature
 
 class OrderSide(Enum):
     BUY = "BUY"
@@ -70,12 +75,12 @@ class Portfolio:
     available_balance: float
 
 class KalshiClient:
-    """Kalshi API client with HMAC authentication and rate limiting"""
+    """Kalshi API client with RSA signature authentication and rate limiting"""
     
-    def __init__(self, api_key: str, api_secret: str, base_url: str = "https://api.elections.kalshi.com", 
+    def __init__(self, api_key: str, private_key: str, base_url: str = "https://api.elections.kalshi.com", 
                  websocket_url: str = "wss://api.elections.kalshi.com/ws/v1", rate_limit: int = 5):
-        self.api_key = api_key
-        self.api_secret = api_secret
+        self.api_key = api_key  # This is the Key ID from Kalshi
+        self.private_key = private_key  # RSA private key in PEM format
         self.base_url = base_url.rstrip('/')
         self.websocket_url = websocket_url
         self.rate_limit = rate_limit
@@ -86,6 +91,16 @@ class KalshiClient:
         
         # Rate limiting
         self.request_times = []
+        
+        # Load the private key
+        try:
+            self.rsa_private_key = serialization.load_pem_private_key(
+                private_key.encode('utf-8'),
+                password=None,
+                backend=default_backend()
+            )
+        except Exception as e:
+            raise ValueError(f"Invalid private key: {e}")
         
     async def __aenter__(self):
         self.session = httpx.AsyncClient(
@@ -100,14 +115,39 @@ class KalshiClient:
         if self.websocket:
             await self.websocket.close()
     
-    def _create_auth_headers(self) -> Dict[str, str]:
-        """Create authentication headers for Kalshi API"""
-        # Based on Kalshi API documentation, using simple API key authentication
-        return {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "X-API-Key": self.api_key
-        }
+    def _create_auth_headers(self, method: str, path: str) -> Dict[str, str]:
+        """Create authentication headers for Kalshi API using RSA signature"""
+        # Generate timestamp in milliseconds
+        timestamp = str(int(time.time() * 1000))
+        
+        # Create string to sign: timestamp + method + path
+        string_to_sign = timestamp + method + path
+        
+        # Sign with RSA-PSS SHA256
+        try:
+            signature = self.rsa_private_key.sign(
+                string_to_sign.encode('utf-8'),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            
+            # Base64 encode the signature
+            signature_b64 = base64.b64encode(signature).decode('utf-8')
+            
+            return {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "KALSHI-ACCESS-KEY": self.api_key,
+                "KALSHI-ACCESS-TIMESTAMP": timestamp,
+                "KALSHI-ACCESS-SIGNATURE": signature_b64
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating RSA signature: {e}")
+            raise
     
     async def _rate_limit(self):
         """Implement rate limiting"""
@@ -136,8 +176,8 @@ class KalshiClient:
         path = f"/trade-api/v2{endpoint}"
         url = f"{self.base_url}{path}"
         
-        # Prepare headers
-        headers = self._create_auth_headers()
+        # Prepare headers with RSA signature
+        headers = self._create_auth_headers(method, path)
         
         logger.debug(f"Making {method} request to {url}")
         

@@ -11,8 +11,8 @@ load_dotenv()
 
 class KalshiConfig(BaseModel):
     """Configuration for Kalshi API"""
-    api_key: str = Field(..., description="Kalshi API key")
-    api_secret: str = Field(..., description="Kalshi API secret")
+    api_key: str = Field(..., description="Kalshi API key (Key ID)")
+    private_key: str = Field(..., description="Kalshi RSA private key in PEM format")
     base_url: str = Field(default="https://api.elections.kalshi.com", description="Base API URL")
     websocket_url: str = Field(default="wss://api.elections.kalshi.com/ws/v1", description="WebSocket URL")
     rate_limit_requests_per_second: int = Field(default=5, description="Rate limit for API requests")
@@ -20,13 +20,16 @@ class KalshiConfig(BaseModel):
     @validator('api_key')
     def validate_api_key(cls, v):
         if not v:
-            raise ValueError("Kalshi API key is required")
+            raise ValueError("Kalshi API key (Key ID) is required")
         return v
     
-    @validator('api_secret')
-    def validate_api_secret(cls, v):
+    @validator('private_key')
+    def validate_private_key(cls, v):
         if not v:
-            raise ValueError("Kalshi API secret is required")
+            raise ValueError("Kalshi RSA private key is required")
+        # Basic validation that it looks like a PEM key
+        if not v.strip().startswith('-----BEGIN') or not v.strip().endswith('-----'):
+            raise ValueError("Private key must be in PEM format")
         return v
 
 class OctagonConfig(BaseModel):
@@ -104,7 +107,7 @@ def load_config() -> BotConfig:
     return BotConfig(
         kalshi=KalshiConfig(
             api_key=os.getenv("KALSHI_API_KEY", ""),
-            api_secret=os.getenv("KALSHI_API_SECRET", ""),
+            private_key=os.getenv("KALSHI_PRIVATE_KEY", ""),
             base_url=os.getenv("KALSHI_BASE_URL", "https://api.elections.kalshi.com"),
             websocket_url=os.getenv("KALSHI_WS_URL", "wss://api.elections.kalshi.com/ws/v1"),
             rate_limit_requests_per_second=int(os.getenv("KALSHI_RATE_LIMIT", "5"))

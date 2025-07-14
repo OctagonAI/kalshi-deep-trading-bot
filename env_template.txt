@@ -6,9 +6,13 @@
 # ==============================================
 
 # Kalshi API Configuration
-# Get these from your Kalshi account settings
-KALSHI_API_KEY=your_kalshi_api_key_here
-KALSHI_API_SECRET=your_kalshi_api_secret_here
+# Get these from your Kalshi account settings -> API Keys
+# 1. KALSHI_API_KEY is the "Key ID" shown in your account
+# 2. KALSHI_PRIVATE_KEY is the RSA private key in PEM format (keep the -----BEGIN/END----- lines)
+KALSHI_API_KEY=your_kalshi_key_id_here
+KALSHI_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
+your_private_key_content_here
+-----END RSA PRIVATE KEY-----"
 KALSHI_BASE_URL=https://api.elections.kalshi.com
 KALSHI_WS_URL=wss://api.elections.kalshi.com/ws/v1
 KALSHI_RATE_LIMIT=5
@@ -98,7 +102,7 @@ STARTUP_DELAY_SECONDS=30       # Wait 30 seconds before starting
 #    cp env_template.txt .env
 
 # 2. Edit .env and add your API keys:
-#    - Get Kalshi API keys from your account settings
+#    - Get Kalshi API Key ID and RSA private key from your account settings
 #    - Get Octagon API key from https://app.octagonai.co
 
 # 3. Start in dry run mode:
@@ -124,4 +128,5 @@ STARTUP_DELAY_SECONDS=30       # Wait 30 seconds before starting
 # - Monitor the bot closely, especially initially
 # - Start with conservative position sizes
 # - Test strategies thoroughly before live trading
-# - Keep API keys secure and never commit them to version control 
+# - Keep API keys and private keys secure and never commit them to version control
+# - The RSA private key should be kept strictly confidential 
