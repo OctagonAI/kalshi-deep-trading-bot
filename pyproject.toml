@@ -28,7 +28,7 @@ dev = [
 ]
 
 [project.scripts]
-trading-bot = "trading_bot:main"
+trading-bot = "trading_bot:cli"
 
 [build-system]
 requires = ["hatchling"]

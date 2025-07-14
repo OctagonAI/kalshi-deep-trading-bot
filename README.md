@@ -46,7 +46,7 @@ cp env_template.txt .env
 
 Required API keys:
 - **Kalshi API**: Get from [kalshi.com](https://kalshi.com/profile/api) or [demo.kalshi.co](https://demo.kalshi.co)
-- **Octagon API**: Contact Octagon team for access
+- **Octagon API**: Get from [app.octagonai.co](https://app.octagonai.co/signup)
 - **OpenAI API**: Get from [platform.openai.com](https://platform.openai.com/api-keys)
 
 ### 4. Run the Bot

@@ -493,5 +493,10 @@ async def main():
     await bot.run()
 
 
+def cli():
+    """Command line interface entry point."""
+    asyncio.run(main())
+
+
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    cli() 
