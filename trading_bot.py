@@ -3,7 +3,8 @@ Simple Kalshi trading bot with Octagon research and OpenAI decision making.
 """
 import asyncio
 import json
-from typing import List, Dict, Any
+import re
+from typing import List, Dict, Any, Optional
 from loguru import logger
 from rich.console import Console
 from rich.table import Table
@@ -137,6 +138,38 @@ class SimpleTradingBot:
         self.console.print(f"[green]✓ Found {total_markets} total markets across {len(event_markets)} events[/green]")
         return event_markets
     
+    def _parse_probabilities_from_research(self, research_text: str, markets: List[Dict[str, Any]]) -> Dict[str, float]:
+        """Parse probability predictions from Octagon research text."""
+        probabilities = {}
+        
+        # Look for patterns like "TICKER: 75%" or "Market TICKER has 65% probability"
+        for market in markets:
+            ticker = market.get('ticker', '')
+            if not ticker:
+                continue
+                
+            # Try different patterns to find probability for this ticker
+            patterns = [
+                rf"{re.escape(ticker)}[:\s]*(\d+)%",
+                rf"{re.escape(ticker)}[:\s]*(\d+\.?\d*)%",
+                rf"probability.*{re.escape(ticker)}[:\s]*(\d+\.?\d*)%",
+                rf"{re.escape(ticker)}.*probability.*?(\d+\.?\d*)%",
+                rf"{re.escape(ticker)}.*(\d+\.?\d*)%.*probability",
+            ]
+            
+            for pattern in patterns:
+                matches = re.findall(pattern, research_text, re.IGNORECASE)
+                if matches:
+                    try:
+                        prob = float(matches[0])
+                        if 0 <= prob <= 100:
+                            probabilities[ticker] = prob
+                            break
+                    except ValueError:
+                        continue
+        
+        return probabilities
+    
     async def research_events(self, event_markets: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
         """Research each event and its markets using Octagon Deep Research."""
         self.console.print(f"\n[bold]Step 3: Researching {len(event_markets)} events...[/bold]")
@@ -168,11 +201,19 @@ class SimpleTradingBot:
                 try:
                     results = await asyncio.gather(*tasks, return_exceptions=True)
                     
-                    for (event_ticker, _), result in zip(batch, results):
+                    for (event_ticker, data), result in zip(batch, results):
                         if not isinstance(result, Exception):
                             research_results[event_ticker] = result
                             progress.update(task, advance=1)
                             self.console.print(f"[green]✓ Researched {event_ticker}[/green]")
+                            
+                            # Parse and display probabilities
+                            probabilities = self._parse_probabilities_from_research(result, data['markets'])
+                            if probabilities:
+                                self.console.print(f"[blue]Predicted probabilities for {event_ticker}:[/blue]")
+                                for ticker, prob in probabilities.items():
+                                    self.console.print(f"  {ticker}: {prob:.1f}%")
+                            
                         else:
                             self.console.print(f"[red]✗ Failed to research {event_ticker}: {result}[/red]")
                             progress.update(task, advance=1)
@@ -185,7 +226,37 @@ class SimpleTradingBot:
                 await asyncio.sleep(1)
         
         self.console.print(f"[green]✓ Completed research on {len(research_results)} events[/green]")
+        
+        # Show summary table of all predicted probabilities
+        self._display_probability_summary(research_results, event_markets)
+        
         return research_results
+    
+    def _display_probability_summary(self, research_results: Dict[str, str], event_markets: Dict[str, Dict[str, Any]]):
+        """Display a summary table of all predicted probabilities."""
+        table = Table(title="Octagon Probability Predictions Summary")
+        table.add_column("Event", style="cyan")
+        table.add_column("Market", style="yellow")
+        table.add_column("Ticker", style="magenta")
+        table.add_column("Predicted Probability", style="green", justify="right")
+        
+        for event_ticker, research_text in research_results.items():
+            if event_ticker in event_markets:
+                markets = event_markets[event_ticker]['markets']
+                probabilities = self._parse_probabilities_from_research(research_text, markets)
+                
+                for market in markets:
+                    ticker = market.get('ticker', '')
+                    prob = probabilities.get(ticker, 0)
+                    
+                    table.add_row(
+                        event_ticker,
+                        market.get('title', 'N/A')[:40] + ("..." if len(market.get('title', '')) > 40 else ""),
+                        ticker,
+                        f"{prob:.1f}%" if prob > 0 else "N/A"
+                    )
+        
+        self.console.print(table)
     
     async def get_betting_decisions(self, event_markets: Dict[str, Dict[str, Any]], 
                                    research_results: Dict[str, str]) -> MarketAnalysis:
@@ -326,6 +397,13 @@ class SimpleTradingBot:
         placed_bets = 0
         total_bet = 0.0
         
+        # Display bets to be placed with reasoning
+        self.console.print("\n[bold]Bets to be placed:[/bold]")
+        for decision in actionable_decisions:
+            self.console.print(f"[cyan]{decision.ticker}[/cyan]: {decision.action} ${decision.amount:.2f}")
+            self.console.print(f"  [blue]Reasoning: {decision.reasoning}[/blue]")
+            self.console.print(f"  [magenta]Confidence: {decision.confidence:.2f}[/magenta]\n")
+        
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -338,6 +416,7 @@ class SimpleTradingBot:
                     if self.config.dry_run:
                         # Simulate bet placement
                         self.console.print(f"[yellow]DRY RUN: Would place {decision.action} bet on {decision.ticker} for ${decision.amount:.2f}[/yellow]")
+                        self.console.print(f"[yellow]  Reasoning: {decision.reasoning}[/yellow]")
                         placed_bets += 1
                         total_bet += decision.amount
                     else:
@@ -351,6 +430,7 @@ class SimpleTradingBot:
                         
                         if result.get('success', False):
                             self.console.print(f"[green]✓ Placed {decision.action} bet on {decision.ticker} for ${decision.amount:.2f}[/green]")
+                            self.console.print(f"[green]  Reasoning: {decision.reasoning}[/green]")
                             placed_bets += 1
                             total_bet += decision.amount
                         else:
