@@ -43,6 +43,10 @@ DRY_RUN=true
 MAX_MARKETS=50
 MAX_BET_AMOUNT=25.0
 
+# Event analysis configuration
+MAX_EVENTS_TO_ANALYZE=50      # Number of top events to analyze by 24h volume
+RESEARCH_BATCH_SIZE=10        # Number of parallel deep research requests (1-20 recommended)
+
 # =============================================================================
 # SETUP INSTRUCTIONS
 # =============================================================================

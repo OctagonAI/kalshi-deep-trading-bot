@@ -54,11 +54,12 @@ class SimpleTradingBot:
         
         self.console.print(f"\n[{env_color}]Environment: {env_name}[/{env_color}]")
         self.console.print(f"[blue]Mode: {mode}[/blue]")
-        self.console.print(f"[blue]Max events: {self.config.max_markets}[/blue]")
+        self.console.print(f"[blue]Max events to analyze: {self.config.max_events_to_analyze}[/blue]")
+        self.console.print(f"[blue]Research batch size: {self.config.research_batch_size}[/blue]")
         self.console.print(f"[blue]Max bet amount: ${self.config.max_bet_amount}[/blue]\n")
     
     async def get_top_events(self) -> List[Dict[str, Any]]:
-        """Get top events sorted by liquidity (popularity indicator)."""
+        """Get top events sorted by 24-hour volume."""
         self.console.print("[bold]Step 1: Fetching top events...[/bold]")
         
         with Progress(
@@ -70,22 +71,22 @@ class SimpleTradingBot:
             task = progress.add_task("Fetching events...", total=None)
             
             try:
-                events = await self.kalshi_client.get_events(limit=self.config.max_markets)
+                events = await self.kalshi_client.get_events(limit=self.config.max_events_to_analyze)
                 
                 self.console.print(f"[green]✓ Found {len(events)} events[/green]")
                 
                 # Show top 10 events
-                table = Table(title="Top 10 Events by Liquidity")
+                table = Table(title="Top 10 Events by 24h Volume")
                 table.add_column("Event Ticker", style="cyan")
                 table.add_column("Title", style="yellow")
-                table.add_column("Liquidity", style="magenta", justify="right")
+                table.add_column("24h Volume", style="magenta", justify="right")
                 table.add_column("Category", style="green")
                 
                 for event in events[:10]:
                     table.add_row(
                         event.get('event_ticker', 'N/A'),
                         event.get('title', 'N/A')[:50] + ("..." if len(event.get('title', '')) > 50 else ""),
-                        f"{event.get('liquidity', 0):,}",
+                        f"{event.get('volume_24h', 0):,}",
                         event.get('category', 'N/A')
                     )
                 
@@ -186,7 +187,7 @@ class SimpleTradingBot:
             task = progress.add_task("Researching events...", total=len(event_markets))
             
             # Research events in batches to avoid rate limits
-            batch_size = 3
+            batch_size = self.config.research_batch_size
             event_items = list(event_markets.items())
             
             for i in range(0, len(event_items), batch_size):

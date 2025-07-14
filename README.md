@@ -2,6 +2,18 @@
 
 A straightforward trading bot for Kalshi prediction markets that uses Octagon Deep Research for market analysis and OpenAI for structured betting decisions.
 
+## ⚠️ Financial Disclaimer
+
+**IMPORTANT: This software is provided for educational and research purposes only. Trading prediction markets involves significant financial risk.**
+
+- **No Financial Advice**: This bot does not provide financial advice. All trading decisions are made by automated algorithms and should not be considered investment recommendations.
+- **Risk of Loss**: Trading prediction markets can result in substantial financial losses. You may lose some or all of your invested capital.
+- **No Liability**: Octagon AI, its affiliates, and contributors are not liable for any trading losses, damages, or other financial consequences resulting from the use of this software.
+- **Use at Your Own Risk**: By using this software, you acknowledge that you understand the risks involved and that you are solely responsible for any trading decisions and their outcomes.
+- **No Warranty**: This software is provided "as is" without any warranties or guarantees of performance, accuracy, or profitability.
+
+**Please trade responsibly and only with capital you can afford to lose.**
+
 ## How It Works
 
 The bot follows a simple 4-step workflow:
@@ -71,8 +83,10 @@ KALSHI_USE_DEMO=true          # Use demo environment for testing
 DRY_RUN=true                  # Simulate trades without real money
 
 # Limits
-MAX_MARKETS=50                # Maximum events to process
+MAX_EVENTS_TO_ANALYZE=50      # Number of top events to analyze by 24h volume
+MAX_MARKETS=50                # Maximum events to process (deprecated, use MAX_EVENTS_TO_ANALYZE)
 MAX_BET_AMOUNT=25.0           # Maximum bet per market
+RESEARCH_BATCH_SIZE=10        # Number of parallel deep research requests
 
 # API Keys
 KALSHI_API_KEY=your_key
@@ -80,6 +94,11 @@ KALSHI_PRIVATE_KEY=your_private_key
 OCTAGON_API_KEY=your_key
 OPENAI_API_KEY=your_key
 ```
+
+### Configuration Notes
+
+- **MAX_EVENTS_TO_ANALYZE**: Controls how many of the top events (sorted by 24h volume) to analyze. The bot fetches ALL events from Kalshi, sorts them by trading volume, and processes only the top N most active events.
+- **RESEARCH_BATCH_SIZE**: Controls how many deep research requests are sent in parallel. Higher values process faster but may hit rate limits. Recommended range: 1-20.
 
 ## Recommended Testing Flow
 

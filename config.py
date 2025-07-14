@@ -82,6 +82,8 @@ class BotConfig(BaseSettings):
     dry_run: bool = Field(default=True, description="Run in dry-run mode")
     max_markets: int = Field(default=50, description="Maximum number of events to process")
     max_bet_amount: float = Field(default=100.0, description="Maximum bet amount per market")
+    max_events_to_analyze: int = Field(default=50, description="Number of top events to analyze by volume_24h")
+    research_batch_size: int = Field(default=10, description="Number of parallel deep research requests to batch")
     
     def __init__(self, **data):
         # Build nested configs from environment variables
@@ -115,7 +117,9 @@ class BotConfig(BaseSettings):
             "openai": openai_config,
             "dry_run": os.getenv("DRY_RUN", "true").lower() == "true",
             "max_markets": int(os.getenv("MAX_MARKETS", "50")),
-            "max_bet_amount": float(os.getenv("MAX_BET_AMOUNT", "100.0"))
+            "max_bet_amount": float(os.getenv("MAX_BET_AMOUNT", "100.0")),
+            "max_events_to_analyze": int(os.getenv("MAX_EVENTS_TO_ANALYZE", "50")),
+            "research_batch_size": int(os.getenv("RESEARCH_BATCH_SIZE", "10"))
         })
         
         super().__init__(**data)
