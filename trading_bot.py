@@ -25,8 +25,10 @@ from betting_models import BettingDecision, MarketAnalysis
 class SimpleTradingBot:
     """Simple trading bot that follows a clear workflow."""
     
-    def __init__(self):
+    def __init__(self, live_trading: bool = False):
         self.config = load_config()
+        # Override dry_run based on CLI parameter
+        self.config.dry_run = not live_trading
         self.console = Console()
         self.kalshi_client = None
         self.research_client = None
@@ -499,9 +501,9 @@ class SimpleTradingBot:
                 await self.kalshi_client.close()
 
 
-async def main():
+async def main(live_trading: bool = False):
     """Main entry point."""
-    bot = SimpleTradingBot()
+    bot = SimpleTradingBot(live_trading=live_trading)
     await bot.run()
 
 
@@ -512,7 +514,8 @@ def cli():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  uv run trading-bot                    # Run bot with default settings
+  uv run trading-bot                    # Run bot in dry run mode (default)
+  uv run trading-bot --live             # Run bot with live trading enabled
   uv run trading-bot --help            # Show this help message
   
 Configuration:
@@ -524,10 +527,21 @@ Configuration:
     
   Optional settings:
     KALSHI_USE_DEMO=true               # Use demo environment (default: true)
-    DRY_RUN=true                       # Simulate trades (default: true)
-    MAX_MARKETS=50                     # Max events to process (default: 50)
+    MAX_EVENTS_TO_ANALYZE=50           # Max events to analyze (default: 50)
     MAX_BET_AMOUNT=25.0                # Max bet per market (default: 25.0)
+    RESEARCH_BATCH_SIZE=10             # Parallel research requests (default: 10)
+    SKIP_EXISTING_POSITIONS=true       # Skip markets with existing positions (default: true)
+    
+  Trading modes:
+    Default: Dry run mode - shows what trades would be made without placing real bets
+    --live: Live trading mode - actually places bets (use with caution!)
         """
+    )
+    
+    parser.add_argument(
+        '--live',
+        action='store_true',
+        help='Enable live trading (default: dry run mode)'
     )
     
     parser.add_argument(
@@ -541,7 +555,7 @@ Configuration:
     
     # Try to load config and run bot
     try:
-        asyncio.run(main())
+        asyncio.run(main(live_trading=args.live))
     except Exception as e:
         console = Console()
         console.print(f"[red]Error: {e}[/red]")

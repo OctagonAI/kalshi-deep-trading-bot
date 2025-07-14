@@ -36,9 +36,6 @@ OPENAI_MODEL=gpt-4o
 # BOT CONFIGURATION
 # =============================================================================
 
-# Trading mode (set to false for live trading)
-DRY_RUN=true
-
 # Market processing limits
 MAX_MARKETS=50
 MAX_BET_AMOUNT=25.0

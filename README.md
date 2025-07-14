@@ -63,14 +63,20 @@ Required API keys:
 
 ### 4. Run the Bot
 
+**Default (Dry Run Mode):**
 ```bash
+# Shows what trades would be made without placing real bets
 uv run trading_bot.py
+# OR
+uv run trading-bot
 ```
 
-Or use the installed command:
-
+**Live Trading Mode:**
 ```bash
-uv run trading-bot
+# Actually places bets (use with caution!)
+uv run trading_bot.py --live
+# OR
+uv run trading-bot --live
 ```
 
 ## Configuration
@@ -80,7 +86,6 @@ Key settings in `.env`:
 ```env
 # Environment
 KALSHI_USE_DEMO=true          # Use demo environment for testing
-DRY_RUN=true                  # Simulate trades without real money
 
 # Limits
 MAX_EVENTS_TO_ANALYZE=50      # Number of top events to analyze by 24h volume
@@ -102,11 +107,21 @@ OPENAI_API_KEY=your_key
 - **RESEARCH_BATCH_SIZE**: Controls how many deep research requests are sent in parallel. Higher values process faster but may hit rate limits. Recommended range: 1-20.
 - **SKIP_EXISTING_POSITIONS**: When enabled (default), the bot will skip betting on markets where you already have positions to avoid duplicate trades.
 
-## Recommended Testing Flow
+### Trading Modes
 
-1. **Demo + Dry Run**: Start with `KALSHI_USE_DEMO=true` and `DRY_RUN=true`
-2. **Demo + Live**: Test with `KALSHI_USE_DEMO=true` and `DRY_RUN=false`
-3. **Production**: Only use `KALSHI_USE_DEMO=false` after thorough testing
+**Demo vs Production Environment:**
+- `KALSHI_USE_DEMO=true`: Uses Kalshi's demo environment with test data and fake money
+- `KALSHI_USE_DEMO=false`: Uses Kalshi's production environment with real markets and real money
+
+**Dry Run vs Live Trading:**
+- **Default (Dry Run)**: Shows what trades would be made without placing real bets
+- **Live Trading (`--live`)**: Actually places bets on the selected environment
+
+**Recommended Testing Flow:**
+1. `KALSHI_USE_DEMO=true` + Default (dry run): Test with demo data, no bets placed
+2. `KALSHI_USE_DEMO=true` + `--live`: Test with demo data, fake bets placed
+3. `KALSHI_USE_DEMO=false` + Default (dry run): Test with real data, no bets placed
+4. `KALSHI_USE_DEMO=false` + `--live`: **LIVE TRADING** with real money
 
 ## Project Structure
 
