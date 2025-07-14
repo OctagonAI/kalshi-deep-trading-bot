@@ -1,0 +1,49 @@
+[project]
+name = "kalshi-trading-bot"
+version = "1.0.0"
+description = "Simple Kalshi trading bot with Octagon research and OpenAI decision making"
+authors = [
+    {name = "Octagon", email = "support@octagon.ai"}
+]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "httpx==0.27.0",
+    "websockets==12.0",
+    "pydantic==2.5.0",
+    "pydantic-settings==2.1.0",
+    "python-dotenv==1.0.0",
+    "loguru==0.7.2",
+    "rich==13.7.0",
+    "cryptography==41.0.8",
+    "openai==1.55.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "isort>=5.0.0",
+    "flake8>=6.0.0",
+]
+
+[project.scripts]
+trading-bot = "trading_bot:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.black]
+line-length = 100
+target-version = ['py38']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"] 

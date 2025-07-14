@@ -6,28 +6,36 @@ A straightforward trading bot for Kalshi prediction markets that uses Octagon De
 
 The bot follows a simple 4-step workflow:
 
-1. **Fetch Markets**: Retrieves all active markets from Kalshi, sorted by volume (descending)
-2. **Research Markets**: Uses Octagon Deep Research to analyze each market for trading insights
-3. **Make Decisions**: Feeds research results into OpenAI for structured betting decisions
-4. **Place Bets**: Executes the recommended bets via Kalshi API
+1. **Fetch Events**: Gets top 50 events from Kalshi sorted by volume
+2. **Fetch Markets**: Gets all markets for each event
+3. **Research Events**: Uses Octagon Deep Research to analyze event + markets (without odds)
+4. **Make Decisions**: Feeds research results into OpenAI for structured betting decisions
+5. **Place Bets**: Executes the recommended bets via Kalshi API
 
 ## Features
 
 - **Simple & Direct**: No complex strategies or risk management systems
 - **AI-Powered**: Uses Octagon Deep Research for market analysis and OpenAI for decision making
+- **Event-Based**: Analyzes entire events with all markets for better context
 - **Flexible Environment**: Supports both demo and production environments
 - **Dry Run Mode**: Test the bot without placing real bets
-- **Rich Console**: Beautiful progress tracking and result display
+- **Rich Console**: Beautiful progress tracking and result display with probability predictions
 
 ## Quick Start
 
-### 1. Install Dependencies
+### 1. Install uv (if not already installed)
 
 ```bash
-pip install -r requirements.txt
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### 2. Set Up Environment
+### 2. Install Dependencies
+
+```bash
+uv sync
+```
+
+### 3. Set Up Environment
 
 Copy the environment template and fill in your API credentials:
 
@@ -41,10 +49,16 @@ Required API keys:
 - **Octagon API**: Contact Octagon team for access
 - **OpenAI API**: Get from [platform.openai.com](https://platform.openai.com/api-keys)
 
-### 3. Run the Bot
+### 4. Run the Bot
 
 ```bash
-python trading_bot.py
+uv run trading_bot.py
+```
+
+Or use the installed command:
+
+```bash
+uv run trading-bot
 ```
 
 ## Configuration
@@ -57,7 +71,7 @@ KALSHI_USE_DEMO=true          # Use demo environment for testing
 DRY_RUN=true                  # Simulate trades without real money
 
 # Limits
-MAX_MARKETS=50                # Maximum markets to process
+MAX_MARKETS=50                # Maximum events to process
 MAX_BET_AMOUNT=25.0           # Maximum bet per market
 
 # API Keys
@@ -81,7 +95,7 @@ OPENAI_API_KEY=your_key
 ├── kalshi_client.py        # Kalshi API client
 ├── research_client.py      # Octagon Deep Research client
 ├── betting_models.py       # Pydantic models for betting decisions
-├── requirements.txt        # Python dependencies
+├── pyproject.toml          # uv dependencies and project config
 ├── env_template.txt        # Environment configuration template
 └── README.md              # This file
 ```
@@ -90,12 +104,14 @@ OPENAI_API_KEY=your_key
 
 ### Kalshi API
 - **Authentication**: RSA signature-based authentication
-- **Markets**: Fetches active markets sorted by volume
+- **Events**: Fetches top events sorted by volume
+- **Markets**: Gets all markets for each event
 - **Orders**: Places buy/sell orders for YES/NO positions
 
 ### Octagon Deep Research
-- **Research**: Analyzes market sentiment, news, and trading factors
-- **Insights**: Provides actionable trading recommendations
+- **Research**: Analyzes event + markets for sentiment, news, and trading factors
+- **Probability Predictions**: Provides independent probability assessments
+- **Insights**: Gives actionable trading recommendations
 - **Risk Assessment**: Identifies key risk factors for each market
 
 ### OpenAI API
@@ -106,22 +122,32 @@ OPENAI_API_KEY=your_key
 ## Example Output
 
 ```
-Step 1: Fetching active markets...
-✓ Found 50 active markets
+Step 1: Fetching top events...
+✓ Found 50 events
 
-Step 2: Researching 50 markets...
-✓ Researched PRES-2024-12-31
-✓ Researched STOCKS-2024-12-31
-✓ Completed research on 48 markets
+Step 2: Fetching markets for 50 events...
+✓ Found 247 total markets across 45 events
 
-Step 3: Generating betting decisions...
-✓ Generated 15 betting decisions
+Step 3: Researching 45 events...
+✓ Researched NYC-MAYOR-2025
+Predicted probabilities for NYC-MAYOR-2025:
+  NYC-MAYOR-ZOHRAN: 71.0%
+  NYC-MAYOR-ADAMS: 13.0%
+✓ Completed research on 42 events
 
-Step 4: Placing bets...
-✓ Placed buy_yes bet on PRES-2024-12-31 for $25.00
-✓ Placed buy_no bet on STOCKS-2024-12-31 for $15.00
-✓ Successfully placed 12 bets
-✓ Total amount bet: $245.00
+Step 4: Generating betting decisions...
+✓ Generated 34 betting decisions
+
+Step 5: Placing bets...
+Bets to be placed:
+NYC-MAYOR-ZOHRAN: buy_yes $25.00
+  Reasoning: Research shows 71% probability, current market odds undervalue this candidate
+  Confidence: 0.85
+
+✓ Placed buy_yes bet on NYC-MAYOR-ZOHRAN for $25.00
+  Reasoning: Research shows 71% probability, current market odds undervalue this candidate
+✓ Successfully placed 28 bets
+✓ Total amount bet: $1,247.50
 ```
 
 ## Safety Features
@@ -137,10 +163,11 @@ Step 4: Placing bets...
 ### Architecture
 
 The bot uses a simple, linear workflow:
-1. `SimpleTradingBot.get_active_markets()` - Fetch markets from Kalshi
-2. `SimpleTradingBot.research_markets()` - Research each market with Octagon
-3. `SimpleTradingBot.get_betting_decisions()` - Process research with OpenAI
-4. `SimpleTradingBot.place_bets()` - Execute bets via Kalshi
+1. `SimpleTradingBot.get_top_events()` - Fetch top events from Kalshi
+2. `SimpleTradingBot.get_markets_for_events()` - Get markets for each event
+3. `SimpleTradingBot.research_events()` - Research each event with Octagon
+4. `SimpleTradingBot.get_betting_decisions()` - Process research with OpenAI
+5. `SimpleTradingBot.place_bets()` - Execute bets via Kalshi
 
 ### Key Classes
 
@@ -149,6 +176,23 @@ The bot uses a simple, linear workflow:
 - **OctagonClient**: Octagon Deep Research interface
 - **BettingDecision**: Individual betting decision model
 - **MarketAnalysis**: Complete analysis with multiple decisions
+
+### Development Commands
+
+```bash
+# Install development dependencies
+uv sync --group dev
+
+# Run tests
+uv run pytest
+
+# Format code
+uv run black .
+uv run isort .
+
+# Lint code
+uv run flake8 .
+```
 
 ### Error Handling
 
@@ -160,7 +204,7 @@ The bot handles various error scenarios:
 
 ## Limitations
 
-- **Market Coverage**: Processes markets sequentially to avoid rate limits
+- **Event Coverage**: Processes events sequentially to avoid rate limits
 - **Research Quality**: Depends on Octagon Deep Research data quality
 - **Decision Making**: Relies on OpenAI's analysis capabilities
 - **Risk Management**: Basic position sizing and confidence thresholds only
@@ -174,5 +218,5 @@ This project is for educational and research purposes. Use at your own risk.
 For issues or questions:
 1. Check the error logs for detailed error messages
 2. Verify API credentials and rate limits
-3. Test with smaller market limits first
+3. Test with smaller event limits first
 4. Use dry run mode for debugging 
