@@ -1,24 +1,20 @@
 """
-Simple Octagon Deep Research API client.
+Simple Octagon Deep Research API client using OpenAI SDK.
 """
-import httpx
+import openai
 from typing import Dict, Any, Optional
 from loguru import logger
 from config import OctagonConfig
 
 
 class OctagonClient:
-    """Simple client for Octagon Deep Research API."""
+    """Simple client for Octagon Deep Research API using OpenAI SDK."""
     
     def __init__(self, config: OctagonConfig):
         self.config = config
-        self.client = httpx.AsyncClient(
-            base_url=config.base_url,
-            headers={
-                "Authorization": f"Bearer {config.api_key}",
-                "Content-Type": "application/json"
-            },
-            timeout=120.0
+        self.client = openai.AsyncOpenAI(
+            api_key=config.api_key,
+            base_url=config.base_url
         )
     
     async def research_market(self, market_title: str, market_ticker: str) -> str:
@@ -49,22 +45,20 @@ class OctagonClient:
             Focus on actionable insights for trading decisions.
             """
             
-            response = await self.client.post(
-                "/v1/responses",
-                json={
-                    "model": "octagon-deep-research-agent",
-                    "prompt": prompt
-                }
+            response = await self.client.chat.completions.create(
+                model="octagon-deep-research-agent",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1
             )
-            response.raise_for_status()
             
-            data = response.json()
-            return data.get("response", "")
+            return response.choices[0].message.content
             
         except Exception as e:
             logger.error(f"Error researching market {market_ticker}: {e}")
             return f"Error researching market: {str(e)}"
     
     async def close(self):
-        """Close the HTTP client."""
-        await self.client.aclose() 
+        """Close the client (OpenAI client doesn't need explicit closing)."""
+        pass 
