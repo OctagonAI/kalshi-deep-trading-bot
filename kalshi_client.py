@@ -72,8 +72,8 @@ class Portfolio:
 class KalshiClient:
     """Kalshi API client with HMAC authentication and rate limiting"""
     
-    def __init__(self, api_key: str, api_secret: str, base_url: str = "https://api.kalshi.com", 
-                 websocket_url: str = "wss://api.kalshi.com/ws/v1", rate_limit: int = 5):
+    def __init__(self, api_key: str, api_secret: str, base_url: str = "https://api.elections.kalshi.com", 
+                 websocket_url: str = "wss://api.elections.kalshi.com/ws/v1", rate_limit: int = 5):
         self.api_key = api_key
         self.api_secret = api_secret
         self.base_url = base_url.rstrip('/')
@@ -100,22 +100,14 @@ class KalshiClient:
         if self.websocket:
             await self.websocket.close()
     
-    def _create_hmac_signature(self, method: str, path: str, body: str = "", timestamp: str = None) -> Tuple[str, str]:
-        """Create HMAC signature for authentication"""
-        if timestamp is None:
-            timestamp = str(int(time.time()))
-        
-        # Create message to sign
-        message = f"{method}\n{path}\n{body}\n{timestamp}"
-        
-        # Create HMAC signature
-        signature = hmac.new(
-            self.api_secret.encode('utf-8'),
-            message.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
-        
-        return signature, timestamp
+    def _create_auth_headers(self) -> Dict[str, str]:
+        """Create authentication headers for Kalshi API"""
+        # Based on Kalshi API documentation, using simple API key authentication
+        return {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-API-Key": self.api_key
+        }
     
     async def _rate_limit(self):
         """Implement rate limiting"""
@@ -141,22 +133,11 @@ class KalshiClient:
         
         await self._rate_limit()
         
-        path = f"/v1{endpoint}"
+        path = f"/trade-api/v2{endpoint}"
         url = f"{self.base_url}{path}"
         
-        # Prepare request body
-        body = json.dumps(data) if data else ""
-        
-        # Create signature
-        signature, timestamp = self._create_hmac_signature(method, path, body, timestamp)
-        
         # Prepare headers
-        headers = {
-            "Content-Type": "application/json",
-            "X-API-Key": self.api_key,
-            "X-Signature": signature,
-            "X-Timestamp": timestamp
-        }
+        headers = self._create_auth_headers()
         
         logger.debug(f"Making {method} request to {url}")
         
@@ -192,38 +173,43 @@ class KalshiClient:
         response = await self._make_request("GET", "/markets", params=params)
         
         markets = []
-        for market_data in response.get('markets', []):
+        # Handle different response structure from actual API
+        markets_data = response.get('markets', response.get('data', []))
+        
+        for market_data in markets_data:
             markets.append(Market(
-                id=market_data['id'],
-                title=market_data['title'],
-                status=market_data['status'],
-                expiration_date=market_data['expiration_date'],
-                close_price=market_data.get('close_price'),
-                volume=market_data.get('volume'),
-                bid=market_data.get('bid'),
-                ask=market_data.get('ask'),
-                last_price=market_data.get('last_price'),
-                category=market_data.get('category')
+                id=market_data.get('id', market_data.get('ticker', '')),
+                title=market_data.get('title', market_data.get('subtitle', '')),
+                status=market_data.get('status', market_data.get('market_status', 'unknown')),
+                expiration_date=market_data.get('expiration_date', market_data.get('close_date', '')),
+                close_price=market_data.get('close_price', market_data.get('settlement_price')),
+                volume=market_data.get('volume', market_data.get('volume_24h', 0)),
+                bid=market_data.get('bid', market_data.get('yes_bid')),
+                ask=market_data.get('ask', market_data.get('yes_ask')),
+                last_price=market_data.get('last_price', market_data.get('last_trade_price')),
+                category=market_data.get('category', market_data.get('category_name'))
             ))
         
         return markets
     
     async def get_market(self, market_id: str) -> Market:
         """Get specific market details"""
-        response = await self._make_request("GET", f"/markets/{market_id}")
+        response = await self._make_request("GET", f"/market/{market_id}")
         
-        market_data = response['market']
+        # Handle different response structure from actual API
+        market_data = response.get('market', response)
+        
         return Market(
-            id=market_data['id'],
-            title=market_data['title'],
-            status=market_data['status'],
-            expiration_date=market_data['expiration_date'],
-            close_price=market_data.get('close_price'),
-            volume=market_data.get('volume'),
-            bid=market_data.get('bid'),
-            ask=market_data.get('ask'),
-            last_price=market_data.get('last_price'),
-            category=market_data.get('category')
+            id=market_data.get('id', market_data.get('ticker', market_id)),
+            title=market_data.get('title', market_data.get('subtitle', '')),
+            status=market_data.get('status', market_data.get('market_status', 'unknown')),
+            expiration_date=market_data.get('expiration_date', market_data.get('close_date', '')),
+            close_price=market_data.get('close_price', market_data.get('settlement_price')),
+            volume=market_data.get('volume', market_data.get('volume_24h', 0)),
+            bid=market_data.get('bid', market_data.get('yes_bid')),
+            ask=market_data.get('ask', market_data.get('yes_ask')),
+            last_price=market_data.get('last_price', market_data.get('last_trade_price')),
+            category=market_data.get('category', market_data.get('category_name'))
         )
     
     async def get_portfolio(self) -> Portfolio:
@@ -231,44 +217,50 @@ class KalshiClient:
         response = await self._make_request("GET", "/portfolio")
         
         positions = []
-        for pos_data in response.get('positions', []):
+        # Handle different response structure from actual API
+        portfolio_data = response.get('portfolio', response)
+        
+        for pos_data in portfolio_data.get('positions', []):
             positions.append(Position(
-                market_id=pos_data['market_id'],
-                quantity=pos_data['quantity'],
-                avg_price=pos_data['avg_price'],
-                unrealized_pnl=pos_data['unrealized_pnl'],
-                realized_pnl=pos_data['realized_pnl']
+                market_id=pos_data.get('market_id', pos_data.get('market_ticker', '')),
+                quantity=pos_data.get('quantity', 0),
+                avg_price=pos_data.get('avg_price', pos_data.get('purchase_price', 0)),
+                unrealized_pnl=pos_data.get('unrealized_pnl', 0),
+                realized_pnl=pos_data.get('realized_pnl', 0)
             ))
         
         return Portfolio(
-            balance=response['balance'],
+            balance=portfolio_data.get('balance', 0),
             positions=positions,
-            total_pnl=response['total_pnl'],
-            available_balance=response['available_balance']
+            total_pnl=portfolio_data.get('total_pnl', 0),
+            available_balance=portfolio_data.get('available_balance', portfolio_data.get('balance', 0))
         )
     
     async def get_orders(self, market_id: Optional[str] = None, status: Optional[str] = None) -> List[Order]:
         """Get orders with optional filtering"""
         params = {}
         if market_id:
-            params['market_id'] = market_id
+            params['ticker'] = market_id
         if status:
             params['status'] = status
         
         response = await self._make_request("GET", "/orders", params=params)
         
         orders = []
-        for order_data in response.get('orders', []):
+        # Handle different response structure from actual API
+        orders_data = response.get('orders', response.get('data', []))
+        
+        for order_data in orders_data:
             orders.append(Order(
-                id=order_data['id'],
-                market_id=order_data['market_id'],
-                side=order_data['side'],
-                quantity=order_data['quantity'],
-                limit_price=order_data['limit_price'],
-                status=order_data['status'],
-                created_at=order_data['created_at'],
-                filled_quantity=order_data.get('filled_quantity'),
-                remaining_quantity=order_data.get('remaining_quantity')
+                id=order_data.get('id', order_data.get('order_id', '')),
+                market_id=order_data.get('market_id', order_data.get('ticker', '')),
+                side=order_data.get('side', order_data.get('action', 'BUY')),
+                quantity=order_data.get('quantity', order_data.get('count', 0)),
+                limit_price=order_data.get('limit_price', order_data.get('price', 0)),
+                status=order_data.get('status', order_data.get('order_status', 'unknown')),
+                created_at=order_data.get('created_at', order_data.get('placed_time', '')),
+                filled_quantity=order_data.get('filled_quantity', order_data.get('remaining_count', 0)),
+                remaining_quantity=order_data.get('remaining_quantity', order_data.get('remaining_count', 0))
             ))
         
         return orders
@@ -277,26 +269,28 @@ class KalshiClient:
                          limit_price: float, order_type: OrderType = OrderType.LIMIT) -> Order:
         """Place a new order"""
         data = {
-            "market_id": market_id,
-            "side": side.value,
-            "quantity": quantity,
-            "limit_price": limit_price,
+            "ticker": market_id,
+            "action": side.value,
+            "count": quantity,
+            "price": limit_price,
             "type": order_type.value
         }
         
         response = await self._make_request("POST", "/orders", data=data)
         
-        order_data = response['order']
+        # Handle different response structure from actual API
+        order_data = response.get('order', response)
+        
         return Order(
-            id=order_data['id'],
-            market_id=order_data['market_id'],
-            side=order_data['side'],
-            quantity=order_data['quantity'],
-            limit_price=order_data['limit_price'],
-            status=order_data['status'],
-            created_at=order_data['created_at'],
-            filled_quantity=order_data.get('filled_quantity'),
-            remaining_quantity=order_data.get('remaining_quantity')
+            id=order_data.get('id', order_data.get('order_id', '')),
+            market_id=order_data.get('market_id', order_data.get('ticker', market_id)),
+            side=order_data.get('side', order_data.get('action', side.value)),
+            quantity=order_data.get('quantity', order_data.get('count', quantity)),
+            limit_price=order_data.get('limit_price', order_data.get('price', limit_price)),
+            status=order_data.get('status', order_data.get('order_status', 'pending')),
+            created_at=order_data.get('created_at', order_data.get('placed_time', '')),
+            filled_quantity=order_data.get('filled_quantity', 0),
+            remaining_quantity=order_data.get('remaining_quantity', quantity)
         )
     
     async def cancel_order(self, order_id: str) -> bool:
@@ -310,7 +304,7 @@ class KalshiClient:
     
     async def get_order_book(self, market_id: str) -> Dict[str, Any]:
         """Get order book for a market"""
-        response = await self._make_request("GET", f"/markets/{market_id}/order_book")
+        response = await self._make_request("GET", f"/market/{market_id}/order_book")
         return response
     
     async def connect_websocket(self, on_message_callback=None):
@@ -373,8 +367,8 @@ class KalshiClient:
     async def get_market_history(self, market_id: str, limit: int = 100) -> List[Dict]:
         """Get historical price data for a market"""
         params = {'limit': limit}
-        response = await self._make_request("GET", f"/markets/{market_id}/history", params=params)
-        return response.get('history', [])
+        response = await self._make_request("GET", f"/market/{market_id}/history", params=params)
+        return response.get('history', response.get('data', []))
     
     def calculate_spread(self, market: Market) -> Optional[float]:
         """Calculate bid-ask spread for a market"""

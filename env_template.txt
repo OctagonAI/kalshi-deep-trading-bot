@@ -9,14 +9,14 @@
 # Get these from your Kalshi account settings
 KALSHI_API_KEY=your_kalshi_api_key_here
 KALSHI_API_SECRET=your_kalshi_api_secret_here
-KALSHI_BASE_URL=https://api.kalshi.com
-KALSHI_WS_URL=wss://api.kalshi.com/ws/v1
+KALSHI_BASE_URL=https://api.elections.kalshi.com
+KALSHI_WS_URL=wss://api.elections.kalshi.com/ws/v1
 KALSHI_RATE_LIMIT=5
 
 # Octagon Deep Research API Configuration
 # Get your API key from https://app.octagonai.co
 OCTAGON_API_KEY=your_octagon_api_key_here
-OCTAGON_BASE_URL=https://api.octagon.ai
+OCTAGON_BASE_URL=https://api-gateway.octagonagents.com
 OCTAGON_RATE_LIMIT=5000
 OCTAGON_CONCURRENT_STREAMS=10
 
@@ -80,8 +80,8 @@ STARTUP_DELAY_SECONDS=30       # Wait 30 seconds before starting
 # ==============================================
 
 # API Endpoints (usually don't need to change)
-# KALSHI_BASE_URL=https://api.kalshi.com
-# OCTAGON_BASE_URL=https://api.octagon.ai
+# KALSHI_BASE_URL=https://api.elections.kalshi.com
+# OCTAGON_BASE_URL=https://api-gateway.octagonagents.com
 
 # Rate Limiting
 # KALSHI_RATE_LIMIT=5

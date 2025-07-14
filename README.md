@@ -177,8 +177,8 @@ Comprehensive logging includes:
 
 ### Kalshi API
 
-The bot uses the official Kalshi API with:
-- HMAC authentication
+The bot uses the official Kalshi API (https://docs.kalshi.com/api-reference/api_keys/get-api_keys) with:
+- API key authentication
 - Rate limiting (5 requests/second default)
 - WebSocket support for real-time data
 - Order management (place, cancel, modify)
@@ -186,9 +186,9 @@ The bot uses the official Kalshi API with:
 
 ### Octagon Deep Research API
 
-Integration with Octagon Deep Research Agent:
-- Comprehensive market analysis
-- Sentiment tracking
+Integration with Octagon Deep Research Agent (https://docs.octagonagents.com/guide/agents/deep-research-agent.html):
+- Comprehensive market analysis using `octagon-deep-research-agent` model
+- Sentiment tracking from multiple sources
 - Event impact research
 - Portfolio optimization
 - Multi-source data aggregation

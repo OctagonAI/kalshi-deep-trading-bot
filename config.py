@@ -13,8 +13,8 @@ class KalshiConfig(BaseModel):
     """Configuration for Kalshi API"""
     api_key: str = Field(..., description="Kalshi API key")
     api_secret: str = Field(..., description="Kalshi API secret")
-    base_url: str = Field(default="https://api.kalshi.com", description="Base API URL")
-    websocket_url: str = Field(default="wss://api.kalshi.com/ws/v1", description="WebSocket URL")
+    base_url: str = Field(default="https://api.elections.kalshi.com", description="Base API URL")
+    websocket_url: str = Field(default="wss://api.elections.kalshi.com/ws/v1", description="WebSocket URL")
     rate_limit_requests_per_second: int = Field(default=5, description="Rate limit for API requests")
     
     @validator('api_key')
@@ -32,7 +32,7 @@ class KalshiConfig(BaseModel):
 class OctagonConfig(BaseModel):
     """Configuration for Octagon Deep Research API"""
     api_key: str = Field(..., description="Octagon Deep Research API key")
-    base_url: str = Field(default="https://api.octagon.ai", description="Base API URL")
+    base_url: str = Field(default="https://api-gateway.octagonagents.com", description="Base API URL")
     rate_limit_requests_per_day: int = Field(default=5000, description="Daily rate limit")
     concurrent_streams: int = Field(default=10, description="Max concurrent streams")
     
@@ -105,13 +105,13 @@ def load_config() -> BotConfig:
         kalshi=KalshiConfig(
             api_key=os.getenv("KALSHI_API_KEY", ""),
             api_secret=os.getenv("KALSHI_API_SECRET", ""),
-            base_url=os.getenv("KALSHI_BASE_URL", "https://api.kalshi.com"),
-            websocket_url=os.getenv("KALSHI_WS_URL", "wss://api.kalshi.com/ws/v1"),
+            base_url=os.getenv("KALSHI_BASE_URL", "https://api.elections.kalshi.com"),
+            websocket_url=os.getenv("KALSHI_WS_URL", "wss://api.elections.kalshi.com/ws/v1"),
             rate_limit_requests_per_second=int(os.getenv("KALSHI_RATE_LIMIT", "5"))
         ),
         octagon=OctagonConfig(
             api_key=os.getenv("OCTAGON_API_KEY", ""),
-            base_url=os.getenv("OCTAGON_BASE_URL", "https://api.octagon.ai"),
+            base_url=os.getenv("OCTAGON_BASE_URL", "https://api-gateway.octagonagents.com"),
             rate_limit_requests_per_day=int(os.getenv("OCTAGON_RATE_LIMIT", "5000")),
             concurrent_streams=int(os.getenv("OCTAGON_CONCURRENT_STREAMS", "10"))
         ),
