@@ -8,15 +8,15 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
-    "httpx==0.27.0",
-    "websockets==12.0",
-    "pydantic==2.5.0",
-    "pydantic-settings==2.1.0",
-    "python-dotenv==1.0.0",
-    "loguru==0.7.2",
-    "rich==13.7.0",
-    "cryptography==41.0.8",
-    "openai==1.55.0",
+    "httpx>=0.25.0",
+    "websockets>=11.0",
+    "pydantic>=2.4.0",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "loguru>=0.7.0",
+    "rich>=13.0.0",
+    "cryptography>=41.0.0",
+    "openai>=1.0.0",
 ]
 
 [project.optional-dependencies]
