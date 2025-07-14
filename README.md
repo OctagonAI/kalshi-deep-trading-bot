@@ -1,434 +1,178 @@
-# Kalshi Trading Bot with Octagon Deep Research
+# Simple Kalshi Trading Bot
 
-A sophisticated automated trading bot for Kalshi prediction markets that leverages Octagon Deep Research for comprehensive market analysis and trading insights.
+A straightforward trading bot for Kalshi prediction markets that uses Octagon Deep Research for market analysis and OpenAI for structured betting decisions.
 
-## 🚀 Features
+## How It Works
 
-### Trading Strategies
-- **Sentiment Momentum**: Trades based on market sentiment analysis
-- **Event Arbitrage**: Exploits price-probability mismatches
-- **Research-Based Trades**: Uses comprehensive research insights
-- **Political Polling**: Specialized for political markets using polling data
-- **Mean Reversion**: Technical analysis-based strategy
-- **Correlation Pairs**: Multi-market correlation analysis
+The bot follows a simple 4-step workflow:
 
-### Research Integration
-- **Octagon Deep Research Agent**: Comprehensive market research and analysis
-- **Sentiment Analysis**: Real-time sentiment tracking from multiple sources
-- **Market Forecasting**: AI-powered probability predictions
-- **Event Impact Analysis**: Research on how events affect markets
-- **Portfolio Optimization**: Multi-market allocation recommendations
+1. **Fetch Markets**: Retrieves all active markets from Kalshi, sorted by volume (descending)
+2. **Research Markets**: Uses Octagon Deep Research to analyze each market for trading insights
+3. **Make Decisions**: Feeds research results into OpenAI for structured betting decisions
+4. **Place Bets**: Executes the recommended bets via Kalshi API
 
-### Risk Management
-- **Position Sizing**: Kelly criterion, volatility-adjusted, and confidence-based sizing
-- **Stop Losses**: Automatic stop-loss orders with multiple trigger types
-- **Portfolio Risk**: Real-time risk monitoring and alerts
-- **Drawdown Protection**: Maximum drawdown limits
-- **Concentration Risk**: Position diversification monitoring
+## Features
 
-### Advanced Features
-- **Real-time WebSocket**: Live market data streaming
-- **HMAC Authentication**: Secure API access
-- **Rate Limiting**: Intelligent request throttling
-- **Error Handling**: Comprehensive error recovery
-- **Logging**: Detailed trading logs and monitoring
-- **Database**: SQLite persistence for trades and research
-- **Dry Run Mode**: Test strategies without real money
+- **Simple & Direct**: No complex strategies or risk management systems
+- **AI-Powered**: Uses Octagon Deep Research for market analysis and OpenAI for decision making
+- **Flexible Environment**: Supports both demo and production environments
+- **Dry Run Mode**: Test the bot without placing real bets
+- **Rich Console**: Beautiful progress tracking and result display
 
-## 📋 Requirements
+## Quick Start
 
-- Python 3.8+
-- Kalshi API account and keys
-- Octagon Deep Research API access
-- At least 4GB RAM (for research processing)
+### 1. Install Dependencies
 
-## 🛠️ Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/kalshi-trading-bot.git
-   cd kalshi-trading-bot
-   ```
-
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Set up Kalshi accounts**
-   - **Demo Account**: Create account at https://demo.kalshi.co (for testing)
-   - **Production Account**: Create account at https://kalshi.com (for live trading)
-   - Generate API keys for both accounts separately
-
-4. **Set up environment variables**
-   Create a `.env` file based on the template:
-   ```bash
-   cp env_template.txt .env
-   ```
-
-5. **Configure API keys**
-   Edit `.env` and add your API credentials:
-   ```bash
-   # Choose environment (start with demo for testing)
-   KALSHI_USE_DEMO=true
-   
-   # Demo Credentials (for testing with mock funds)
-   KALSHI_DEMO_API_KEY=your_demo_key_id_here
-   KALSHI_DEMO_PRIVATE_KEY=your_demo_private_key_here
-   
-   # Production Credentials (for live trading)
-   KALSHI_API_KEY=your_kalshi_key_id_here
-   KALSHI_PRIVATE_KEY=your_kalshi_private_key_here
-   
-   # Octagon Deep Research API Configuration
-   OCTAGON_API_KEY=your_octagon_api_key_here
-   ```
-   
-   **Important**: 
-   - **Demo Mode**: Use `KALSHI_USE_DEMO=true` for testing with mock funds
-   - **Production Mode**: Use `KALSHI_USE_DEMO=false` for live trading
-   - Credentials are separate between demo and production environments
-
-## ⚙️ Configuration
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `KALSHI_USE_DEMO` | Use demo environment instead of production | `true` |
-| `KALSHI_API_KEY` | Kalshi production API key (Key ID) | Required |
-| `KALSHI_PRIVATE_KEY` | Kalshi production RSA private key (PEM format) | Required |
-| `KALSHI_DEMO_API_KEY` | Kalshi demo API key (Key ID) | Required for demo |
-| `KALSHI_DEMO_PRIVATE_KEY` | Kalshi demo RSA private key (PEM format) | Required for demo |
-| `OCTAGON_API_KEY` | Octagon Deep Research API key | Required |
-| `DRY_RUN` | Run in simulation mode | `true` |
-| `MAX_POSITION_SIZE` | Maximum position size (% of portfolio) | `0.1` |
-| `MAX_DAILY_LOSS` | Maximum daily loss limit | `0.05` |
-| `STOP_LOSS_PERCENT` | Stop loss percentage | `0.15` |
-| `MIN_PROBABILITY_THRESHOLD` | Minimum confidence for trades | `0.55` |
-| `MAX_CONCURRENT_POSITIONS` | Maximum concurrent positions | `5` |
-
-### Trading Strategies
-
-Configure enabled strategies in `.env`:
 ```bash
-ENABLED_STRATEGIES=sentiment_momentum,event_arbitrage,research_based_trades,political_polling
+pip install -r requirements.txt
 ```
 
-### Market Categories
+### 2. Set Up Environment
 
-Select market categories to trade:
+Copy the environment template and fill in your API credentials:
+
 ```bash
-MARKET_CATEGORIES=politics,economics,technology,sports,entertainment
+cp env_template.txt .env
+# Edit .env with your API keys
 ```
 
-## 🚀 Usage
+Required API keys:
+- **Kalshi API**: Get from [kalshi.com](https://kalshi.com/profile/api) or [demo.kalshi.co](https://demo.kalshi.co)
+- **Octagon API**: Contact Octagon team for access
+- **OpenAI API**: Get from [platform.openai.com](https://platform.openai.com/api-keys)
 
-### Basic Usage
+### 3. Run the Bot
 
-1. **Start the bot**
-   ```bash
-   python trading_bot.py
-   ```
-   
-   The bot will display which environment it's using:
-   - **Green border**: Demo mode (safe testing)
-   - **Yellow border**: Production mode (live trading)
-
-2. **Monitor performance**
-   The bot displays real-time status including:
-   - Active trades
-   - P&L tracking
-   - Risk metrics
-   - Trading opportunities
-
-### Advanced Usage
-
-```python
-from trading_bot import TradingBot
-from config import load_config
-
-# Load configuration
-config = load_config()
-
-# Create and run bot
-bot = TradingBot(config)
-await bot.initialize()
-await bot.run()
-```
-
-### Demo and Dry Run Modes
-
-**Demo Mode**: Always start with demo mode for testing:
 ```bash
-KALSHI_USE_DEMO=true
-DRY_RUN=true
+python trading_bot.py
 ```
 
-**Demo Mode** uses Kalshi's demo environment with mock funds:
-- Safe testing environment at https://demo.kalshi.co
-- Separate credentials from production
-- No real money at risk
-- Full API functionality
+## Configuration
 
-**Dry Run Mode** simulates trades without executing them:
-- Test strategies without any money
-- Validate API connections
-- Monitor bot behavior
-- Analyze performance
+Key settings in `.env`:
 
-**Recommended Testing Flow**:
-1. Start with `KALSHI_USE_DEMO=true` and `DRY_RUN=true`
-2. Test with `KALSHI_USE_DEMO=true` and `DRY_RUN=false` 
-3. Go live with `KALSHI_USE_DEMO=false` and `DRY_RUN=false`
+```env
+# Environment
+KALSHI_USE_DEMO=true          # Use demo environment for testing
+DRY_RUN=true                  # Simulate trades without real money
 
-## 📊 Monitoring
+# Limits
+MAX_MARKETS=50                # Maximum markets to process
+MAX_BET_AMOUNT=25.0           # Maximum bet per market
 
-### Real-time Dashboard
+# API Keys
+KALSHI_API_KEY=your_key
+KALSHI_PRIVATE_KEY=your_private_key
+OCTAGON_API_KEY=your_key
+OPENAI_API_KEY=your_key
+```
 
-The bot provides a rich console interface showing:
-- Portfolio value and daily P&L
-- Active positions and their performance
-- Risk alerts and metrics
-- Trading opportunities analysis
-- Strategy performance breakdown
+## Recommended Testing Flow
 
-### Database Tracking
+1. **Demo + Dry Run**: Start with `KALSHI_USE_DEMO=true` and `DRY_RUN=true`
+2. **Demo + Live**: Test with `KALSHI_USE_DEMO=true` and `DRY_RUN=false`
+3. **Production**: Only use `KALSHI_USE_DEMO=false` after thorough testing
 
-All trades and research are stored in SQLite:
-- `trades` table: Complete trade history
-- `research_cache` table: Market research data
-- `risk_alerts` table: Risk management alerts
+## Project Structure
 
-### Logging
+```
+├── trading_bot.py          # Main bot execution
+├── config.py               # Configuration management
+├── kalshi_client.py        # Kalshi API client
+├── research_client.py      # Octagon Deep Research client
+├── betting_models.py       # Pydantic models for betting decisions
+├── requirements.txt        # Python dependencies
+├── env_template.txt        # Environment configuration template
+└── README.md              # This file
+```
 
-Comprehensive logging includes:
-- Trade executions and closures
-- Research analysis results
-- Risk management actions
-- API interactions
-- Error tracking
-
-## 🔧 API Integration
+## API Integrations
 
 ### Kalshi API
+- **Authentication**: RSA signature-based authentication
+- **Markets**: Fetches active markets sorted by volume
+- **Orders**: Places buy/sell orders for YES/NO positions
 
-The bot uses the official Kalshi API (https://docs.kalshi.com/getting_started/api_keys) with:
-- RSA signature authentication using private key
-- Rate limiting (5 requests/second default)
-- WebSocket support for real-time data
-- Order management (place, cancel, modify)
-- Portfolio tracking
+### Octagon Deep Research
+- **Research**: Analyzes market sentiment, news, and trading factors
+- **Insights**: Provides actionable trading recommendations
+- **Risk Assessment**: Identifies key risk factors for each market
 
-### Octagon Deep Research API
+### OpenAI API
+- **Structured Output**: Uses GPT-4 for betting decision analysis
+- **Decision Making**: Processes research data into actionable bets
+- **Risk Management**: Built-in confidence thresholds and position sizing
 
-Integration with Octagon Deep Research Agent (https://docs.octagonagents.com/guide/agents/deep-research-agent.html):
-- Comprehensive market analysis using `octagon-deep-research-agent` model
-- Sentiment tracking from multiple sources
-- Event impact research
-- Portfolio optimization
-- Multi-source data aggregation
+## Example Output
 
-## 🛡️ Risk Management
+```
+Step 1: Fetching active markets...
+✓ Found 50 active markets
 
-### Position Sizing
+Step 2: Researching 50 markets...
+✓ Researched PRES-2024-12-31
+✓ Researched STOCKS-2024-12-31
+✓ Completed research on 48 markets
 
-Multiple position sizing models:
-- **Kelly Criterion**: Optimal bet sizing based on probability and odds
-- **Volatility Adjusted**: Reduces size for high-volatility markets
-- **Confidence Based**: Scales with research confidence
-- **Risk Level**: Adjusts for strategy risk level
+Step 3: Generating betting decisions...
+✓ Generated 15 betting decisions
 
-### Stop Loss Management
-
-Automatic stop loss protection:
-- Percentage-based stops
-- Market volatility adjustments
-- Strategy-specific parameters
-- Real-time monitoring
-
-### Portfolio Risk
-
-Comprehensive risk monitoring:
-- Daily loss limits
-- Maximum drawdown protection
-- Position concentration limits
-- Real-time alerts
-
-## 📈 Strategies
-
-### Sentiment Momentum
-Trades based on market sentiment analysis from news, social media, and analyst reports.
-
-**Parameters:**
-- Sentiment threshold: 0.3 (positive) / -0.3 (negative)
-- Confidence threshold: 0.7
-- Signal strength: 0.6+
-
-### Event Arbitrage
-Exploits price-probability mismatches based on research insights.
-
-**Parameters:**
-- Probability difference threshold: 0.15
-- Confidence threshold: 0.7
-- Conservative return estimate: 80% of probability difference
-
-### Research-Based Trades
-Uses comprehensive research analysis for high-confidence trades.
-
-**Parameters:**
-- Overall research score: 0.6+
-- Signal strength: 0.7+
-- Signal probability: 0.65+
-
-### Political Polling
-Specialized strategy for political markets using polling data.
-
-**Parameters:**
-- Polling confidence: 0.8+
-- Price divergence: 0.1+
-- Political market identification
-
-### Mean Reversion
-Technical analysis strategy based on price deviations from moving averages.
-
-**Parameters:**
-- Short MA: 5 periods
-- Long MA: 20 periods
-- Reversion threshold: 15% deviation
-
-## 🔍 Research Analysis
-
-### Market Research Pipeline
-
-1. **Sentiment Analysis**: Multi-source sentiment tracking
-2. **Forecast Generation**: AI-powered probability predictions
-3. **Trading Signal**: Comprehensive buy/sell/hold recommendations
-4. **Risk Assessment**: Market-specific risk evaluation
-5. **Portfolio Impact**: Cross-market correlation analysis
-
-### Research Components
-
-- **Sentiment Score**: -1 to 1 range with confidence levels
-- **Probability Forecast**: 0 to 1 with supporting factors
-- **Trading Signal**: BUY/SELL/HOLD with strength and reasoning
-- **Risk Level**: Low/Medium/High with specific factors
-- **Expected Return**: Quantitative return estimates
-
-## 🔒 Security
-
-### API Security
-- RSA signature authentication for Kalshi API
-- Secure environment variable storage
-- Rate limiting and error handling
-- Request validation and sanitization
-
-### Trading Security
-- Dry run mode for testing
-- Position size limits
-- Stop loss protection
-- Risk monitoring and alerts
-
-## 📝 Logging and Monitoring
-
-### Log Levels
-- **DEBUG**: API requests and responses
-- **INFO**: Trading decisions and executions
-- **WARNING**: Risk alerts and unusual conditions
-- **ERROR**: System errors and failures
-
-### Log Rotation
-- Maximum file size: 10MB
-- Retention period: 30 days
-- Automatic compression
-
-## 🧪 Testing
-
-### Unit Tests
-```bash
-python -m pytest tests/
+Step 4: Placing bets...
+✓ Placed buy_yes bet on PRES-2024-12-31 for $25.00
+✓ Placed buy_no bet on STOCKS-2024-12-31 for $15.00
+✓ Successfully placed 12 bets
+✓ Total amount bet: $245.00
 ```
 
-### Integration Tests
-```bash
-python -m pytest tests/integration/
-```
+## Safety Features
 
-### Backtesting
-```bash
-python backtest.py --start-date 2024-01-01 --end-date 2024-12-31
-```
+- **Demo Environment**: Test with mock funds before live trading
+- **Dry Run Mode**: Simulate all operations without real money
+- **Position Limits**: Configurable maximum bet amounts
+- **Confidence Thresholds**: Only bet on high-confidence opportunities
+- **Error Handling**: Comprehensive error handling and logging
 
-## 🚨 Troubleshooting
+## Development
 
-### Common Issues
+### Architecture
 
-1. **API Connection Errors**
-   - Check API keys and private keys
-   - Verify private key is in correct PEM format
-   - Ensure API key (Key ID) is correct
-   - Check if using correct environment (demo vs production)
-   - Verify demo credentials are for demo.kalshi.co account
-   - Verify production credentials are for kalshi.com account
-   - Verify network connectivity
-   - Check rate limits
+The bot uses a simple, linear workflow:
+1. `SimpleTradingBot.get_active_markets()` - Fetch markets from Kalshi
+2. `SimpleTradingBot.research_markets()` - Research each market with Octagon
+3. `SimpleTradingBot.get_betting_decisions()` - Process research with OpenAI
+4. `SimpleTradingBot.place_bets()` - Execute bets via Kalshi
 
-2. **Research Failures**
-   - Verify Octagon API key
-   - Check daily rate limits
-   - Monitor response parsing
+### Key Classes
 
-3. **Trading Errors**
-   - Check account balance
-   - Verify market status
-   - Review position limits
+- **SimpleTradingBot**: Main orchestration class
+- **KalshiClient**: Kalshi API interface
+- **OctagonClient**: Octagon Deep Research interface
+- **BettingDecision**: Individual betting decision model
+- **MarketAnalysis**: Complete analysis with multiple decisions
 
-### Debug Mode
-```bash
-LOG_LEVEL=DEBUG python trading_bot.py
-```
+### Error Handling
 
-## 🤝 Contributing
+The bot handles various error scenarios:
+- API rate limits and timeouts
+- Market data inconsistencies
+- Authentication failures
+- Network connectivity issues
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
+## Limitations
 
-## 📄 License
+- **Market Coverage**: Processes markets sequentially to avoid rate limits
+- **Research Quality**: Depends on Octagon Deep Research data quality
+- **Decision Making**: Relies on OpenAI's analysis capabilities
+- **Risk Management**: Basic position sizing and confidence thresholds only
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+## License
 
-## ⚠️ Disclaimer
+This project is for educational and research purposes. Use at your own risk.
 
-This trading bot is for educational and research purposes. Trading involves significant risk and you should:
+## Support
 
-- Never risk more than you can afford to lose
-- Thoroughly test strategies in dry run mode
-- Monitor bot performance closely
-- Understand all risks involved
-- Consider consulting with financial professionals
-
-The authors are not responsible for any trading losses or damages resulting from the use of this software.
-
-## 🆘 Support
-
-For support and questions:
-- Open an issue on GitHub
-- Check the documentation
-- Review the troubleshooting guide
-
-## 📋 Roadmap
-
-- [ ] Advanced backtesting framework
-- [ ] Strategy optimization tools
-- [ ] Multi-exchange support
-- [ ] Advanced risk metrics
-- [ ] Web-based monitoring dashboard
-- [ ] Machine learning integration
-- [ ] Social trading features
-
----
-
-**Happy Trading! 🚀** 
+For issues or questions:
+1. Check the error logs for detailed error messages
+2. Verify API credentials and rate limits
+3. Test with smaller market limits first
+4. Use dry run mode for debugging 

@@ -1,148 +1,77 @@
-# Kalshi Trading Bot Configuration Template
-# Copy this file to .env and fill in your actual values
+# Simple Kalshi Trading Bot Environment Configuration
+# Copy this file to .env and fill in your API credentials
 
-# ==============================================
-# API CREDENTIALS (REQUIRED)
-# ==============================================
+# =============================================================================
+# KALSHI API CONFIGURATION
+# =============================================================================
 
-# Kalshi API Configuration
-# Choose your environment: set KALSHI_USE_DEMO=true for testing with mock funds
+# Kalshi API credentials
+KALSHI_API_KEY=your_kalshi_api_key_here
+KALSHI_PRIVATE_KEY=your_kalshi_private_key_here
+
+# Environment (use demo for testing)
 KALSHI_USE_DEMO=true
 
-# Production Credentials (for live trading)
-# Get these from your Kalshi account settings -> API Keys
-KALSHI_API_KEY=your_kalshi_key_id_here
-KALSHI_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
-your_private_key_content_here
------END RSA PRIVATE KEY-----"
+# =============================================================================
+# OCTAGON DEEP RESEARCH API CONFIGURATION
+# =============================================================================
 
-# Demo Credentials (for testing - separate from production)
-# Get these from your Kalshi Demo account at https://demo.kalshi.co
-KALSHI_DEMO_API_KEY=your_demo_key_id_here
-KALSHI_DEMO_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
-your_demo_private_key_content_here
------END RSA PRIVATE KEY-----"
-
-# API URLs (usually don't need to change)
-KALSHI_BASE_URL=https://api.elections.kalshi.com
-KALSHI_WS_URL=wss://api.elections.kalshi.com/ws/v1
-KALSHI_DEMO_BASE_URL=https://demo-api.kalshi.co
-KALSHI_DEMO_WS_URL=wss://demo-api.kalshi.co/ws/v1
-KALSHI_RATE_LIMIT=5
-
-# Octagon Deep Research API Configuration
-# Get your API key from https://app.octagonai.co
+# Octagon API credentials
 OCTAGON_API_KEY=your_octagon_api_key_here
-OCTAGON_BASE_URL=https://api-gateway.octagonagents.com
-OCTAGON_RATE_LIMIT=5000
-OCTAGON_CONCURRENT_STREAMS=10
+OCTAGON_BASE_URL=https://api.octagon.ai
 
-# ==============================================
-# TRADING CONFIGURATION
-# ==============================================
+# =============================================================================
+# OPENAI API CONFIGURATION
+# =============================================================================
 
-# Bot Mode (IMPORTANT: Start with DRY_RUN=true)
+# OpenAI API for structured betting decisions
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-4o
+
+# =============================================================================
+# BOT CONFIGURATION
+# =============================================================================
+
+# Trading mode (set to false for live trading)
 DRY_RUN=true
 
-# Trading Strategies (comma-separated)
-# Options: sentiment_momentum, event_arbitrage, research_based_trades, political_polling, mean_reversion
-ENABLED_STRATEGIES=sentiment_momentum,event_arbitrage,research_based_trades,political_polling
+# Market processing limits
+MAX_MARKETS=50
+MAX_BET_AMOUNT=25.0
 
-# Market Categories (comma-separated)
-# Options: politics, economics, technology, sports, entertainment
-MARKET_CATEGORIES=politics,economics,technology,sports,entertainment
+# =============================================================================
+# SETUP INSTRUCTIONS
+# =============================================================================
 
-# Trading Thresholds
-MIN_VOLUME_THRESHOLD=1000
-MAX_SPREAD=0.05
-RESEARCH_REFRESH_MINUTES=30
+# 1. Get Kalshi API credentials:
+#    - Go to https://kalshi.com/profile/api (or demo.kalshi.co for demo)
+#    - Generate API key and download private key
+#    - For demo: use demo.kalshi.co with separate demo credentials
+#    - For production: use api.kalshi.co with production credentials
 
-# ==============================================
-# RISK MANAGEMENT
-# ==============================================
+# 2. Get Octagon API key:
+#    - Contact Octagon team for API access
+#    - Replace OCTAGON_API_KEY with your actual key
 
-# Position Sizing (as decimal percentage)
-MAX_POSITION_SIZE=0.1          # 10% of portfolio per position
-MAX_DAILY_LOSS=0.05            # 5% daily loss limit
-MAX_PORTFOLIO_RISK=0.2         # 20% maximum drawdown
+# 3. Get OpenAI API key:
+#    - Go to https://platform.openai.com/api-keys
+#    - Create a new API key
+#    - Ensure you have access to GPT-4 models
 
-# Stop Loss and Take Profit
-STOP_LOSS_PERCENT=0.15         # 15% stop loss
-TAKE_PROFIT_PERCENT=0.25       # 25% take profit
+# 4. Test setup:
+#    - Start with DRY_RUN=true and KALSHI_USE_DEMO=true
+#    - Test with small MAX_MARKETS (10-20) first
+#    - Only use production after thorough testing
 
-# Trading Limits
-MIN_PROBABILITY_THRESHOLD=0.55  # 55% minimum confidence
-MAX_CONCURRENT_POSITIONS=5      # Maximum 5 positions at once
+# =============================================================================
+# RECOMMENDED TESTING FLOW
+# =============================================================================
 
-# ==============================================
-# SYSTEM CONFIGURATION
-# ==============================================
+# Phase 1: Demo + Dry Run
+# KALSHI_USE_DEMO=true, DRY_RUN=true, MAX_MARKETS=10
 
-# Logging
-LOG_LEVEL=INFO
-LOG_FILE=trading_bot.log
-MAX_FILE_SIZE=10 MB
-RETENTION_DAYS=30
+# Phase 2: Demo + Live Trading  
+# KALSHI_USE_DEMO=true, DRY_RUN=false, MAX_MARKETS=20
 
-# Database
-DB_PATH=trading_bot.db
-BACKUP_INTERVAL_HOURS=24
-
-# Bot Timing
-LOOP_INTERVAL_SECONDS=60       # Main loop every 60 seconds
-STARTUP_DELAY_SECONDS=30       # Wait 30 seconds before starting
-
-# ==============================================
-# ADVANCED SETTINGS (Optional)
-# ==============================================
-
-# API Endpoints (usually don't need to change)
-# KALSHI_BASE_URL=https://api.elections.kalshi.com
-# OCTAGON_BASE_URL=https://api-gateway.octagonagents.com
-
-# Rate Limiting
-# KALSHI_RATE_LIMIT=5
-# OCTAGON_RATE_LIMIT=5000
-
-# Performance Tuning
-# OCTAGON_CONCURRENT_STREAMS=10
-
-# ==============================================
-# QUICK START GUIDE
-# ==============================================
-
-# 1. Copy this file to .env:
-#    cp env_template.txt .env
-
-# 2. Edit .env and add your API keys:
-#    - For DEMO: Get Kalshi Demo API credentials from https://demo.kalshi.co
-#    - For PRODUCTION: Get Kalshi API credentials from your production account
-#    - Get Octagon API key from https://app.octagonai.co
-
-# 3. Start in demo mode for testing:
-#    KALSHI_USE_DEMO=true
-#    DRY_RUN=true
-
-# 4. Install dependencies:
-#    pip install -r requirements.txt
-
-# 5. Run the bot:
-#    python trading_bot.py
-
-# 6. Monitor performance and adjust settings as needed
-
-# 7. When ready for live trading:
-#    KALSHI_USE_DEMO=false
-#    DRY_RUN=false
-
-# ==============================================
-# SAFETY REMINDERS
-# ==============================================
-
-# - Always start with DRY_RUN=true
-# - Never risk more than you can afford to lose
-# - Monitor the bot closely, especially initially
-# - Start with conservative position sizes
-# - Test strategies thoroughly before live trading
-# - Keep API keys and private keys secure and never commit them to version control
-# - The RSA private key should be kept strictly confidential 
+# Phase 3: Production + Live Trading
+# KALSHI_USE_DEMO=false, DRY_RUN=false, MAX_MARKETS=50 
