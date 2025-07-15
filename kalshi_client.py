@@ -308,27 +308,35 @@ class KalshiClient:
             return False  # If we can't check, assume no position to be safe
 
     async def place_order(self, ticker: str, side: str, amount: float) -> Dict[str, Any]:
-        """Place a simple order."""
+        """Place a simple market order."""
         try:
+            # Generate a unique client order ID
+            import uuid
+            client_order_id = str(uuid.uuid4())
+            
+            # Convert dollar amount to cents for buy_max_cost
+            buy_max_cost_cents = int(amount * 100)
+            
             order_data = {
                 "ticker": ticker,
                 "side": side,  # "yes" or "no"
                 "action": "buy",
-                "amount": amount,
-                "type": "market"
+                "type": "market",
+                "client_order_id": client_order_id,
+                "buy_max_cost": buy_max_cost_cents  # For market buy orders, specify max cost in cents
             }
             
-            headers = await self._get_headers("POST", "/trade-api/v2/orders")
+            headers = await self._get_headers("POST", "/trade-api/v2/portfolio/orders")
             response = await self.client.post(
-                "/trade-api/v2/orders",
+                "/trade-api/v2/portfolio/orders",
                 headers=headers,
                 json=order_data
             )
             response.raise_for_status()
             
             result = response.json()
-            logger.info(f"Order placed: {ticker} {side} ${amount}")
-            return {"success": True, "order_id": result.get("order_id", "")}
+            logger.info(f"Order placed: {ticker} {side} ${amount} (max cost: {buy_max_cost_cents} cents)")
+            return {"success": True, "order_id": result.get("order_id", ""), "client_order_id": client_order_id}
             
         except Exception as e:
             logger.error(f"Error placing order: {e}")
