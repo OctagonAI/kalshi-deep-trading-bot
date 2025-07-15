@@ -277,9 +277,19 @@ class KalshiClient:
             response.raise_for_status()
             
             data = response.json()
-            positions = data.get("positions", [])
             
-            logger.info(f"Retrieved {len(positions)} positions")
+            # Debug: Log the raw API response structure
+            logger.debug(f"Position API response keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+            
+            # The API returns market_positions, not positions
+            positions = data.get("market_positions", [])
+            
+            # Also check for event_positions (though we primarily need market_positions)
+            event_positions = data.get("event_positions", [])
+            
+            logger.info(f"Retrieved {len(positions)} market positions and {len(event_positions)} event positions")
+            logger.debug(f"Market positions: {positions[:3] if positions else 'None'}")  # Log first 3 for debugging
+            
             return positions
             
         except Exception as e:
@@ -293,12 +303,13 @@ class KalshiClient:
             
             for position in positions:
                 if position.get("ticker") == ticker:
-                    # Check if position has any shares (either yes or no)
-                    yes_position = position.get("yes_position", 0)
-                    no_position = position.get("no_position", 0)
+                    # Check if position has any contracts
+                    # In Kalshi API: positive = YES contracts, negative = NO contracts, 0 = no position
+                    position_size = position.get("position", 0)
                     
-                    if yes_position != 0 or no_position != 0:
-                        logger.info(f"Found existing position in {ticker}: YES={yes_position}, NO={no_position}")
+                    if position_size != 0:
+                        position_type = "YES" if position_size > 0 else "NO"
+                        logger.info(f"Found existing position in {ticker}: {abs(position_size)} {position_type} contracts")
                         return True
             
             return False
