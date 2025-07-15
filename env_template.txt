@@ -37,13 +37,15 @@ OPENAI_MODEL=gpt-4o
 # =============================================================================
 
 # Market processing limits
-MAX_MARKETS=50
 MAX_BET_AMOUNT=25.0
 
 # Event analysis configuration
 MAX_EVENTS_TO_ANALYZE=50      # Number of top events to analyze by 24h volume
 RESEARCH_BATCH_SIZE=10        # Number of parallel deep research requests (1-20 recommended)
 SKIP_EXISTING_POSITIONS=true # Skip betting on markets where we already have positions
+MINIMUM_TIME_REMAINING_HOURS=1.0  # Minimum hours remaining before event strike to consider it tradeable (only applied to events with strike_date)
+MAX_MARKETS_PER_EVENT=10     # Maximum number of markets per event to analyze (selects top N markets by volume)
+MINIMUM_ALPHA_THRESHOLD=2.0  # Minimum alpha threshold for betting (research_price / market_price must be >= this value)
 
 # =============================================================================
 # SETUP INSTRUCTIONS
@@ -78,7 +80,7 @@ SKIP_EXISTING_POSITIONS=true # Skip betting on markets where we already have pos
 
 # 5. Test setup:
 #    - Start with DRY_RUN=true and KALSHI_USE_DEMO=true
-#    - Test with small MAX_MARKETS (10-20) first
+#    - Test with small MAX_EVENTS_TO_ANALYZE (5-10) first
 #    - Only use production after thorough testing
 
 # =============================================================================
@@ -86,10 +88,10 @@ SKIP_EXISTING_POSITIONS=true # Skip betting on markets where we already have pos
 # =============================================================================
 
 # Phase 1: Demo + Dry Run
-# KALSHI_USE_DEMO=true, DRY_RUN=true, MAX_MARKETS=10
+# KALSHI_USE_DEMO=true, DRY_RUN=true, MAX_EVENTS_TO_ANALYZE=5
 
 # Phase 2: Demo + Live Trading  
-# KALSHI_USE_DEMO=true, DRY_RUN=false, MAX_MARKETS=20
+# KALSHI_USE_DEMO=true, DRY_RUN=false, MAX_EVENTS_TO_ANALYZE=10
 
 # Phase 3: Production + Live Trading
-# KALSHI_USE_DEMO=false, DRY_RUN=false, MAX_MARKETS=50 
+# KALSHI_USE_DEMO=false, DRY_RUN=false, MAX_EVENTS_TO_ANALYZE=50 

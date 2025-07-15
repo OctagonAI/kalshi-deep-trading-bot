@@ -5,6 +5,21 @@ from typing import List, Optional, Literal
 from pydantic import BaseModel, Field
 
 
+class MarketProbability(BaseModel):
+    """Structured probability data for a single market."""
+    ticker: str = Field(..., description="The market ticker symbol")
+    title: str = Field(..., description="Human-readable market title")
+    research_probability: float = Field(..., ge=0, le=100, description="Research predicted probability (0-100)")
+    reasoning: str = Field(..., description="Brief reasoning for the probability estimate")
+    confidence: float = Field(..., ge=0, le=1, description="Confidence in the probability estimate (0-1)")
+
+
+class ProbabilityExtraction(BaseModel):
+    """Structured extraction of probabilities from research."""
+    markets: List[MarketProbability] = Field(..., description="List of market probabilities")
+    overall_summary: str = Field(..., description="Overall research summary and key insights")
+
+
 class BettingDecision(BaseModel):
     """A single betting decision for a market."""
     ticker: str = Field(..., description="The market ticker symbol")
@@ -12,6 +27,10 @@ class BettingDecision(BaseModel):
     confidence: float = Field(..., ge=0, le=1, description="Confidence in decision (0-1)")
     amount: float = Field(..., ge=0, description="Amount to bet in dollars")
     reasoning: str = Field(..., description="Brief reasoning for the decision")
+    
+    # Human-readable names for display
+    event_name: Optional[str] = Field(None, description="Human-readable event name")
+    market_name: Optional[str] = Field(None, description="Human-readable market name")
 
 
 class MarketAnalysis(BaseModel):

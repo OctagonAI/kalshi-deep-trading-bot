@@ -16,13 +16,14 @@ A straightforward trading bot for Kalshi prediction markets that uses Octagon De
 
 ## How It Works
 
-The bot follows a simple 4-step workflow:
+The bot follows a simple 6-step workflow:
 
-1. **Fetch Events**: Gets top 50 events from Kalshi sorted by volume
-2. **Fetch Markets**: Gets all markets for each event
+1. **Fetch Events**: Gets top 50 events from Kalshi sorted by volume (filtered by status and time)
+2. **Process Markets**: Uses top 10 highest volume markets per event
 3. **Research Events**: Uses Octagon Deep Research to analyze event + markets (without odds)
-4. **Make Decisions**: Feeds research results into OpenAI for structured betting decisions
-5. **Place Bets**: Executes the recommended bets via Kalshi API
+4. **Fetch Market Odds**: Gets current bid/ask prices for all markets
+5. **Make Decisions**: Feeds research results and market odds into OpenAI for structured betting decisions
+6. **Place Bets**: Executes the recommended bets via Kalshi API
 
 ## Features
 
@@ -89,7 +90,6 @@ KALSHI_USE_DEMO=true          # Use demo environment for testing
 
 # Limits
 MAX_EVENTS_TO_ANALYZE=50      # Number of top events to analyze by 24h volume
-MAX_MARKETS=50                # Maximum events to process (deprecated, use MAX_EVENTS_TO_ANALYZE)
 MAX_BET_AMOUNT=25.0           # Maximum bet per market
 RESEARCH_BATCH_SIZE=10        # Number of parallel deep research requests
 SKIP_EXISTING_POSITIONS=true # Skip betting on markets where we already have positions
@@ -106,6 +106,7 @@ OPENAI_API_KEY=your_key
 - **MAX_EVENTS_TO_ANALYZE**: Controls how many of the top events (sorted by 24h volume) to analyze. The bot fetches ALL events from Kalshi, sorts them by trading volume, and processes only the top N most active events.
 - **RESEARCH_BATCH_SIZE**: Controls how many deep research requests are sent in parallel. Higher values process faster but may hit rate limits. Recommended range: 1-20.
 - **SKIP_EXISTING_POSITIONS**: When enabled (default), the bot will skip betting on markets where you already have positions to avoid duplicate trades.
+- **MAX_MARKETS_PER_EVENT**: Controls how many markets per event to analyze (default: 10). For events with many markets, selects the top N markets by volume to keep context manageable.
 
 ### Trading Modes
 

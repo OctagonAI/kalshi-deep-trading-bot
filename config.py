@@ -22,7 +22,7 @@ class KalshiConfig(BaseModel):
         """Get the appropriate base URL based on environment."""
         if self.use_demo:
             return "https://demo-api.kalshi.co"
-        return "https://api.kalshi.co"
+        return "https://api.elections.kalshi.com"
     
     @validator('private_key')
     def validate_private_key(cls, v):
@@ -80,11 +80,13 @@ class BotConfig(BaseSettings):
     
     # Bot settings
     dry_run: bool = Field(default=True, description="Run in dry-run mode (overridden by CLI)")
-    max_markets: int = Field(default=50, description="Maximum number of events to process")
     max_bet_amount: float = Field(default=100.0, description="Maximum bet amount per market")
     max_events_to_analyze: int = Field(default=50, description="Number of top events to analyze by volume_24h")
     research_batch_size: int = Field(default=10, description="Number of parallel deep research requests to batch")
     skip_existing_positions: bool = Field(default=True, description="Skip betting on markets where we already have positions")
+    minimum_time_remaining_hours: float = Field(default=1.0, description="Minimum hours remaining before event strike to consider it tradeable (only applied to events with strike_date)")
+    max_markets_per_event: int = Field(default=10, description="Maximum number of markets per event to analyze (selects top N markets by volume)")
+    minimum_alpha_threshold: float = Field(default=2.0, description="Minimum alpha threshold for betting (research_price / market_price must be >= this value)")
     
     def __init__(self, **data):
         # Build nested configs from environment variables
@@ -117,11 +119,13 @@ class BotConfig(BaseSettings):
             "octagon": octagon_config,
             "openai": openai_config,
             "dry_run": True,  # Default to dry run, overridden by CLI
-            "max_markets": int(os.getenv("MAX_MARKETS", "50")),
             "max_bet_amount": float(os.getenv("MAX_BET_AMOUNT", "100.0")),
             "max_events_to_analyze": int(os.getenv("MAX_EVENTS_TO_ANALYZE", "50")),
             "research_batch_size": int(os.getenv("RESEARCH_BATCH_SIZE", "10")),
-            "skip_existing_positions": os.getenv("SKIP_EXISTING_POSITIONS", "true").lower() == "true"
+            "skip_existing_positions": os.getenv("SKIP_EXISTING_POSITIONS", "true").lower() == "true",
+            "minimum_time_remaining_hours": float(os.getenv("MINIMUM_TIME_REMAINING_HOURS", "1.0")),
+            "max_markets_per_event": int(os.getenv("MAX_MARKETS_PER_EVENT", "10")),
+            "minimum_alpha_threshold": float(os.getenv("MINIMUM_ALPHA_THRESHOLD", "2.0"))
         })
         
         super().__init__(**data)

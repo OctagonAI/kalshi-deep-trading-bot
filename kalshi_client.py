@@ -19,11 +19,13 @@ from config import KalshiConfig
 class KalshiClient:
     """Simple Kalshi API client for basic trading operations."""
     
-    def __init__(self, config: KalshiConfig):
+    def __init__(self, config: KalshiConfig, minimum_time_remaining_hours: float = 1.0, max_markets_per_event: int = 10):
         self.config = config
         self.base_url = config.base_url
         self.api_key = config.api_key
         self.private_key = config.private_key
+        self.minimum_time_remaining_hours = minimum_time_remaining_hours
+        self.max_markets_per_event = max_markets_per_event
         self.client = None
         self.session_token = None
         
@@ -44,19 +46,63 @@ class KalshiClient:
             # First, fetch ALL events from the platform using pagination
             all_events = await self._fetch_all_events()
             
-            # Calculate total volume_24h for each event from its markets
+            # Calculate total volume_24h for each event from its markets 
+            # (API already filters for "open" status events)
             enriched_events = []
+            now = datetime.now(timezone.utc)
+            minimum_time_remaining = self.minimum_time_remaining_hours * 3600  # Convert hours to seconds
+            
             for event in all_events:
+                # Get markets and select top N by volume
+                all_markets = event.get("markets", [])
+                
+                # Sort markets by volume (descending) and take top N
+                sorted_markets = sorted(all_markets, key=lambda m: m.get("volume", 0), reverse=True)
+                top_markets = sorted_markets[:self.max_markets_per_event]
+                
+                if len(all_markets) > self.max_markets_per_event:
+                    logger.info(f"Event {event.get('event_ticker', '')} has {len(all_markets)} markets, selecting top {len(top_markets)} by volume")
+                
+                # Calculate volume metrics for this event using top markets
                 total_liquidity = 0
                 total_volume = 0
                 total_volume_24h = 0
                 total_open_interest = 0
                 
-                for market in event.get("markets", []):
+                for market in top_markets:
                     total_liquidity += market.get("liquidity", 0)
                     total_volume += market.get("volume", 0)
                     total_volume_24h += market.get("volume_24h", 0)
                     total_open_interest += market.get("open_interest", 0)
+                
+                # Calculate time remaining if strike_date exists
+                time_remaining_hours = None
+                strike_date_str = event.get("strike_date", "")
+                
+                if strike_date_str:
+                    try:
+                        # Parse strike date
+                        if strike_date_str.endswith('Z'):
+                            strike_date = datetime.fromisoformat(strike_date_str.replace('Z', '+00:00'))
+                        else:
+                            strike_date = datetime.fromisoformat(strike_date_str)
+                        
+                        # Ensure timezone awareness
+                        if strike_date.tzinfo is None:
+                            strike_date = strike_date.replace(tzinfo=timezone.utc)
+                        
+                        # Calculate time remaining
+                        time_remaining = (strike_date - now).total_seconds()
+                        time_remaining_hours = time_remaining / 3600
+                        
+                        # Optional: Skip events that are very close to striking
+                        if time_remaining > 0 and time_remaining < minimum_time_remaining:
+                            logger.info(f"Event {event.get('event_ticker', '')} strikes in {time_remaining/60:.1f} minutes, skipping")
+                            continue
+                        
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Could not parse strike_date '{strike_date_str}' for event {event.get('event_ticker', '')}: {e}")
+                        # Continue without time filtering for this event
                 
                 enriched_events.append({
                     "event_ticker": event.get("event_ticker", ""),
@@ -68,6 +114,11 @@ class KalshiClient:
                     "open_interest": total_open_interest,
                     "category": event.get("category", ""),
                     "mutually_exclusive": event.get("mutually_exclusive", False),
+                    "strike_date": strike_date_str,
+                    "strike_period": event.get("strike_period", ""),
+                    "time_remaining_hours": time_remaining_hours,
+                    "markets": top_markets,  # Store the top markets with the event
+                    "total_markets": len(all_markets),  # Store original market count
                 })
             
             # Sort by volume_24h (descending) for true popularity ranking
@@ -76,7 +127,7 @@ class KalshiClient:
             # Return only the top N events as requested
             top_events = enriched_events[:limit]
             
-            logger.info(f"Retrieved {len(all_events)} total events, returning top {len(top_events)} by 24h volume")
+            logger.info(f"Retrieved {len(all_events)} total events, filtered to {len(enriched_events)} active events, returning top {len(top_events)} by 24h volume")
             return top_events
             
         except Exception as e:
@@ -94,7 +145,7 @@ class KalshiClient:
                 headers = await self._get_headers("GET", "/trade-api/v2/events")
                 params = {
                     "limit": 100,  # Maximum events per page
-                    "status": "open",
+                    "status": "open",  # Only get open events (active/tradeable)
                     "with_nested_markets": "true"
                 }
                 
@@ -110,7 +161,11 @@ class KalshiClient:
                 response.raise_for_status()
                 
                 data = response.json()
-                events = data.get("events", [])
+                if data is None:
+                    logger.error(f"Received None response from API")
+                    break
+                    
+                events = data.get("events", []) if isinstance(data, dict) else []
                 
                 if not events:
                     break
@@ -133,7 +188,12 @@ class KalshiClient:
         return all_events
     
     async def get_markets_for_event(self, event_ticker: str) -> List[Dict[str, Any]]:
-        """Get all markets for a specific event."""
+        """Get markets for a specific event (returns pre-filtered top markets from get_events)."""
+        # This method is kept for compatibility but now returns pre-filtered markets
+        # The actual filtering happens in get_events() to avoid duplicate API calls
+        logger.warning(f"get_markets_for_event called for {event_ticker} - markets should be pre-loaded from get_events()")
+        
+        # Fallback: fetch markets directly if needed
         try:
             headers = await self._get_headers("GET", "/trade-api/v2/markets")
             response = await self.client.get(
@@ -144,11 +204,15 @@ class KalshiClient:
             response.raise_for_status()
             
             data = response.json()
-            markets = data.get("markets", [])
+            all_markets = data.get("markets", [])
+            
+            # Sort by volume and take top markets
+            sorted_markets = sorted(all_markets, key=lambda m: m.get("volume", 0), reverse=True)
+            top_markets = sorted_markets[:self.max_markets_per_event]
             
             # Return markets without odds for research
             simple_markets = []
-            for market in markets:
+            for market in top_markets:
                 simple_markets.append({
                     "ticker": market.get("ticker", ""),
                     "title": market.get("title", ""),
@@ -159,7 +223,7 @@ class KalshiClient:
                     # Note: NOT including yes_bid, no_bid, yes_ask, no_ask for research
                 })
             
-            logger.info(f"Retrieved {len(simple_markets)} markets for event {event_ticker}")
+            logger.info(f"Retrieved {len(simple_markets)} markets for event {event_ticker} (top {len(top_markets)} by volume)")
             return simple_markets
             
         except Exception as e:
@@ -179,15 +243,23 @@ class KalshiClient:
             data = response.json()
             market = data.get("market", {})
             
+            # Get specific fields
+            yes_bid = market.get("yes_bid", 0)
+            no_bid = market.get("no_bid", 0)
+            yes_ask = market.get("yes_ask", 0)
+            no_ask = market.get("no_ask", 0)
+            
+            # Note: Event-level filtering is already done in get_events()
             return {
                 "ticker": market.get("ticker", ""),
                 "title": market.get("title", ""),
-                "yes_bid": market.get("yes_bid", 0),
-                "no_bid": market.get("no_bid", 0),
-                "yes_ask": market.get("yes_ask", 0),
-                "no_ask": market.get("no_ask", 0),
+                "yes_bid": yes_bid,
+                "no_bid": no_bid,
+                "yes_ask": yes_ask,
+                "no_ask": no_ask,
                 "volume": market.get("volume", 0),
                 "status": market.get("status", ""),
+                "close_time": market.get("close_time", ""),
             }
             
         except Exception as e:

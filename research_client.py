@@ -35,17 +35,22 @@ class OctagonClient:
             event_info = f"""
             Event: {event.get('title', '')}
             Subtitle: {event.get('subtitle', '')}
-            Category: {event.get('category', '')}
-            Volume: {event.get('volume', 0)}
             Mutually Exclusive: {event.get('mutually_exclusive', False)}
             """
             
             markets_info = "Markets:\n"
             for i, market in enumerate(markets, 1):
-                markets_info += f"{i}. {market.get('ticker', '')}: {market.get('title', '')}\n"
+                if market.get('volume') < 1000:
+                    continue
+                # Emphasize human readable title over ticker
+                title = market.get('title', '')
+                ticker = market.get('ticker', '')
+                markets_info += f"{i}. {title}"
+                if ticker:
+                    markets_info += f" (Ticker: {ticker})"
+                markets_info += "\n"
                 if market.get('subtitle'):
                     markets_info += f"   Subtitle: {market.get('subtitle', '')}\n"
-                markets_info += f"   Volume: {market.get('volume', 0)}\n"
                 markets_info += f"   Open: {market.get('open_time', '')}\n"
                 markets_info += f"   Close: {market.get('close_time', '')}\n\n"
             
@@ -66,9 +71,13 @@ class OctagonClient:
             
             Focus on:
             - Independent analysis of each market's probability
-            - Consider correlations between markets if mutually exclusive
+            - If mutually exclusive: probabilities should sum to ~100% (only one outcome can be true)
+            - If not mutually exclusive: each market can be evaluated independently
             - Provide actionable insights for trading decisions
             - Be specific about probability estimates
+            
+            IMPORTANT: When providing probability predictions, include both the market ticker AND the probability percentage.
+            Example format: "KXTHEOPEN-25-DMCC: 15%" or "McCarthy (KXTHEOPEN-25-DMCC): 15% probability"
             
             Format your response clearly with market tickers and probability predictions.
             """
