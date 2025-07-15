@@ -186,52 +186,60 @@ class SimpleTradingBot:
                 markets = data['markets']
                 total_markets_before += len(markets)
                 
-                filtered_markets = []
+                # Check if we have positions in ANY market of this event
+                event_has_positions = False
+                markets_checked = 0
                 
                 for market in markets:
                     ticker = market.get('ticker', '')
                     if not ticker:
                         progress.update(task, advance=1)
+                        markets_checked += 1
                         continue
                         
                     try:
                         # Check if we already have a position in this market
                         has_position = await self.kalshi_client.has_position_in_market(ticker)
                         if has_position:
-                            self.console.print(f"[yellow]⚠ Skipping {ticker}: Already have position[/yellow]")
-                            skipped_markets += 1
-                        else:
-                            filtered_markets.append(market)
+                            self.console.print(f"[yellow]⚠ Found position in {ticker}[/yellow]")
+                            event_has_positions = True
+                            # Update progress for remaining unchecked markets in this event
+                            remaining_markets = len(markets) - markets_checked - 1
+                            progress.update(task, advance=remaining_markets + 1)
+                            break  # No need to check other markets in this event
                             
                     except Exception as e:
                         logger.warning(f"Could not check position for {ticker}: {e}")
-                        # If we can't check, assume no position and include the market
-                        filtered_markets.append(market)
+                        # If we can't check, assume no position and continue checking other markets
                     
                     progress.update(task, advance=1)
+                    markets_checked += 1
                 
-                # Only keep the event if it still has markets after filtering
-                if filtered_markets:
+                if event_has_positions:
+                    skipped_markets += len(markets)  # Count all markets in event as skipped
+                    self.console.print(f"[yellow]⚠ Skipping entire event {event_ticker}: Has existing positions[/yellow]")
+                else:
+                    # No positions found, keep the entire event
                     filtered_event_markets[event_ticker] = {
                         'event': event,
-                        'markets': filtered_markets
+                        'markets': markets
                     }
-                    total_markets_after += len(filtered_markets)
-                    self.console.print(f"[green]✓ Keeping {len(filtered_markets)} markets for {event_ticker} (filtered {len(markets) - len(filtered_markets)})[/green]")
-                else:
-                    self.console.print(f"[yellow]⚠ Removing {event_ticker}: All markets have existing positions[/yellow]")
+                    total_markets_after += len(markets)
+                    self.console.print(f"[green]✓ Keeping entire event {event_ticker}: No existing positions[/green]")
         
         # Show filtering summary
+        events_skipped = len(event_markets) - len(filtered_event_markets)
         self.console.print(f"\n[blue]Position filtering summary:[/blue]")
-        self.console.print(f"[blue]• Markets before filtering: {total_markets_before}[/blue]")
-        self.console.print(f"[blue]• Markets after filtering: {total_markets_after}[/blue]")
-        self.console.print(f"[blue]• Markets skipped (existing positions): {skipped_markets}[/blue]")
-        self.console.print(f"[blue]• Events remaining: {len(filtered_event_markets)}[/blue]")
+        self.console.print(f"[blue]• Events before filtering: {len(event_markets)}[/blue]")
+        self.console.print(f"[blue]• Events after filtering: {len(filtered_event_markets)}[/blue]")
+        self.console.print(f"[blue]• Events skipped (existing positions): {events_skipped}[/blue]")
+        self.console.print(f"[blue]• Markets in skipped events: {skipped_markets}[/blue]")
+        self.console.print(f"[blue]• Markets remaining for research: {total_markets_after}[/blue]")
         
-        if total_markets_after == 0:
-            self.console.print("[yellow]⚠ No markets remaining after position filtering[/yellow]")
-        elif skipped_markets > 0:
-            time_saved_estimate = skipped_markets * 2  # Rough estimate: 2 minutes per market research
+        if len(filtered_event_markets) == 0:
+            self.console.print("[yellow]⚠ No events remaining after position filtering[/yellow]")
+        elif events_skipped > 0:
+            time_saved_estimate = events_skipped * 3  # Rough estimate: 3 minutes per event research
             self.console.print(f"[green]✓ Estimated time saved by skipping research: ~{time_saved_estimate} minutes[/green]")
             
         return filtered_event_markets
