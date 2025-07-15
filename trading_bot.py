@@ -77,7 +77,11 @@ class SimpleTradingBot:
             task = progress.add_task("Fetching events...", total=None)
             
             try:
-                events = await self.kalshi_client.get_events(limit=self.config.max_events_to_analyze)
+                # Get a larger pool of events to ensure we have enough after filtering positions
+                # Use 3x the target amount to account for events with existing positions
+                fetch_limit = self.config.max_events_to_analyze * 3
+                events = await self.kalshi_client.get_events(limit=fetch_limit)
+                self.console.print(f"[blue]• Fetched {len(events)} events (will filter to top {self.config.max_events_to_analyze} after position filtering)[/blue]")
                 
                 self.console.print(f"[green]✓ Found {len(events)} events[/green]")
                 
@@ -1425,6 +1429,24 @@ class SimpleTradingBot:
             if not event_markets:
                 self.console.print("[red]No markets remaining after position filtering. Exiting.[/red]")
                 return
+            
+            # Limit to max_events_to_analyze after position filtering
+            if len(event_markets) > self.config.max_events_to_analyze:
+                # Sort filtered events by volume_24h and take top N
+                filtered_events_list = []
+                for event_ticker, data in event_markets.items():
+                    event = data['event']
+                    volume_24h = event.get('volume_24h', 0)
+                    filtered_events_list.append((event_ticker, data, volume_24h))
+                
+                # Sort by volume_24h (descending) and take top max_events_to_analyze
+                filtered_events_list.sort(key=lambda x: x[2], reverse=True)
+                top_events = filtered_events_list[:self.config.max_events_to_analyze]
+                
+                # Rebuild event_markets dict with only top events
+                event_markets = {event_ticker: data for event_ticker, data, _ in top_events}
+                
+                self.console.print(f"[blue]• Limited to top {len(event_markets)} events by volume after position filtering[/blue]")
             
             research_results = await self.research_events(event_markets)
             if not research_results:
