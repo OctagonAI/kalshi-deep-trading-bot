@@ -159,6 +159,83 @@ class SimpleTradingBot:
         self.console.print(f"[green]✓ Processing {total_markets} total markets across {len(event_markets)} events[/green]")
         return event_markets
     
+    async def filter_markets_by_positions(self, event_markets: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """Filter out markets where we already have positions to save research time."""
+        if self.config.dry_run or not self.config.skip_existing_positions:
+            # Skip position filtering in dry run mode or if disabled
+            return event_markets
+            
+        self.console.print(f"\n[bold]Step 2.5: Filtering markets by existing positions...[/bold]")
+        
+        filtered_event_markets = {}
+        total_markets_before = 0
+        total_markets_after = 0
+        skipped_markets = 0
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+        ) as progress:
+            # Count total markets for progress
+            total_markets = sum(len(data['markets']) for data in event_markets.values())
+            task = progress.add_task("Checking existing positions...", total=total_markets)
+            
+            for event_ticker, data in event_markets.items():
+                event = data['event']
+                markets = data['markets']
+                total_markets_before += len(markets)
+                
+                filtered_markets = []
+                
+                for market in markets:
+                    ticker = market.get('ticker', '')
+                    if not ticker:
+                        progress.update(task, advance=1)
+                        continue
+                        
+                    try:
+                        # Check if we already have a position in this market
+                        has_position = await self.kalshi_client.has_position_in_market(ticker)
+                        if has_position:
+                            self.console.print(f"[yellow]⚠ Skipping {ticker}: Already have position[/yellow]")
+                            skipped_markets += 1
+                        else:
+                            filtered_markets.append(market)
+                            
+                    except Exception as e:
+                        logger.warning(f"Could not check position for {ticker}: {e}")
+                        # If we can't check, assume no position and include the market
+                        filtered_markets.append(market)
+                    
+                    progress.update(task, advance=1)
+                
+                # Only keep the event if it still has markets after filtering
+                if filtered_markets:
+                    filtered_event_markets[event_ticker] = {
+                        'event': event,
+                        'markets': filtered_markets
+                    }
+                    total_markets_after += len(filtered_markets)
+                    self.console.print(f"[green]✓ Keeping {len(filtered_markets)} markets for {event_ticker} (filtered {len(markets) - len(filtered_markets)})[/green]")
+                else:
+                    self.console.print(f"[yellow]⚠ Removing {event_ticker}: All markets have existing positions[/yellow]")
+        
+        # Show filtering summary
+        self.console.print(f"\n[blue]Position filtering summary:[/blue]")
+        self.console.print(f"[blue]• Markets before filtering: {total_markets_before}[/blue]")
+        self.console.print(f"[blue]• Markets after filtering: {total_markets_after}[/blue]")
+        self.console.print(f"[blue]• Markets skipped (existing positions): {skipped_markets}[/blue]")
+        self.console.print(f"[blue]• Events remaining: {len(filtered_event_markets)}[/blue]")
+        
+        if total_markets_after == 0:
+            self.console.print("[yellow]⚠ No markets remaining after position filtering[/yellow]")
+        elif skipped_markets > 0:
+            time_saved_estimate = skipped_markets * 2  # Rough estimate: 2 minutes per market research
+            self.console.print(f"[green]✓ Estimated time saved by skipping research: ~{time_saved_estimate} minutes[/green]")
+            
+        return filtered_event_markets
+
     def _parse_probabilities_from_research(self, research_text: str, markets: List[Dict[str, Any]]) -> Dict[str, float]:
         """Parse probability predictions from Octagon research text."""
         probabilities = {}
@@ -222,9 +299,9 @@ class SimpleTradingBot:
                 # Show first 200 chars of research text for debugging
                 sample_text = research_text[:200].replace('\n', ' ')
                 logger.debug(f"Research sample: {sample_text}...")
-        
+             
         return probabilities
-    
+
     async def research_events(self, event_markets: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
         """Research each event and its markets using Octagon Deep Research."""
         self.console.print(f"\n[bold]Step 3: Researching {len(event_markets)} events...[/bold]")
@@ -833,7 +910,6 @@ class SimpleTradingBot:
             
             # If no market title found, generate a readable name from ticker
             if not market_title:
-                logger.debug(f"No market title found for ticker {decision.ticker}, generating readable name")
                 market_title = self._generate_readable_market_name(decision.ticker)
             
             enriched_decisions.append(
@@ -1006,13 +1082,7 @@ class SimpleTradingBot:
             
             for decision in actionable_decisions:
                 try:
-                    # Check if we already have a position in this market (if enabled)
-                    if not self.config.dry_run and self.config.skip_existing_positions:
-                        has_position = await self.kalshi_client.has_position_in_market(decision.ticker)
-                        if has_position:
-                            self.console.print(f"[yellow]⚠ Skipping {decision.ticker}: Already have position in this market[/yellow]")
-                            progress.update(task, advance=1)
-                            continue
+                    # Position checking already done earlier in filter_markets_by_positions()
                     
                     if self.config.dry_run:
                         # Simulate bet placement
@@ -1341,6 +1411,11 @@ class SimpleTradingBot:
             event_markets = await self.get_markets_for_events(events)
             if not event_markets:
                 self.console.print("[red]No markets found. Exiting.[/red]")
+                return
+            
+            event_markets = await self.filter_markets_by_positions(event_markets)
+            if not event_markets:
+                self.console.print("[red]No markets remaining after position filtering. Exiting.[/red]")
                 return
             
             research_results = await self.research_events(event_markets)
