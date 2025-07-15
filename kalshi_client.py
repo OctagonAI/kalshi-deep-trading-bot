@@ -314,10 +314,12 @@ class KalshiClient:
             import uuid
             client_order_id = str(uuid.uuid4())
             
-            # For market orders, calculate number of contracts to buy
-            # Assuming contracts are priced around 1-99 cents, use the amount to estimate contracts
-            # We'll start with a conservative estimate and let the market price determine actual cost
-            estimated_contracts = max(1, int(amount))  # At least 1 contract, roughly 1 contract per dollar
+            # Convert dollar amount to cents for buy_max_cost
+            buy_max_cost_cents = int(amount * 100)
+            
+            # For market orders, we want to spend up to our dollar amount
+            # Set a high count but limit with buy_max_cost to control actual spending
+            max_contracts = 1000  # High number to ensure we can buy up to our budget
             
             order_data = {
                 "ticker": ticker,
@@ -325,7 +327,8 @@ class KalshiClient:
                 "action": "buy",
                 "type": "market",
                 "client_order_id": client_order_id,
-                "count": estimated_contracts  # Required parameter - number of contracts to buy
+                "count": max_contracts,  # High count to allow buying up to budget
+                "buy_max_cost": buy_max_cost_cents  # Actual spending limit in cents
             }
             
             headers = await self._get_headers("POST", "/trade-api/v2/portfolio/orders")
@@ -337,7 +340,7 @@ class KalshiClient:
             response.raise_for_status()
             
             result = response.json()
-            logger.info(f"Order placed: {ticker} {side} ${amount} ({estimated_contracts} contracts)")
+            logger.info(f"Order placed: {ticker} {side} ${amount} (max cost: {buy_max_cost_cents} cents)")
             return {"success": True, "order_id": result.get("order_id", ""), "client_order_id": client_order_id}
             
         except Exception as e:
