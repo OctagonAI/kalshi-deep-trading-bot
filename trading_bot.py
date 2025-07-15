@@ -65,6 +65,15 @@ class SimpleTradingBot:
         self.console.print(f"[blue]Minimum alpha threshold: {self.config.minimum_alpha_threshold}x[/blue]")
         hedging_status = "Enabled" if self.config.enable_hedging else "Disabled"
         self.console.print(f"[blue]Risk hedging: {hedging_status} (ratio: {self.config.hedge_ratio}, min confidence: {self.config.min_confidence_for_hedging})[/blue]\n")
+        
+        # Show Kelly Criterion settings
+        if self.config.enable_kelly_criterion:
+            self.console.print(f"[green]Kelly Criterion: Enabled[/green]")
+            self.console.print(f"[blue]  Bankroll: ${self.config.bankroll:,.2f}[/blue]")
+            self.console.print(f"[blue]  Kelly fraction: {self.config.kelly_fraction} ({self.config.kelly_fraction*100:.0f}% of full Kelly)[/blue]")
+            self.console.print(f"[blue]  Max bet fraction: {self.config.max_kelly_bet_fraction} ({self.config.max_kelly_bet_fraction*100:.0f}% of bankroll)[/blue]\n")
+        else:
+            self.console.print(f"[yellow]Kelly Criterion: Disabled[/yellow]\n")
     
     async def get_top_events(self) -> List[Dict[str, Any]]:
         """Get top events sorted by 24-hour volume."""
@@ -317,17 +326,35 @@ class SimpleTradingBot:
         return probabilities
 
     async def research_events(self, event_markets: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
-        """Research each event and its markets using Octagon Deep Research."""
-        self.console.print(f"\n[bold]Step 3: Researching {len(event_markets)} events...[/bold]")
+        """Research each event and its markets using Octagon Deep Research with ensemble approach."""
+        self.console.print(f"\n[bold]Step 3: Researching {len(event_markets)} events with ensemble approach...[/bold]")
         
         research_results = {}
+        
+        # Define multiple research perspectives for ensemble
+        research_prompts = [
+            {
+                "perspective": "statistical",
+                "prompt_suffix": "Focus on historical data, statistical trends, and quantitative analysis."
+            },
+            {
+                "perspective": "news_sentiment", 
+                "prompt_suffix": "Focus on recent news, public sentiment, and qualitative factors."
+            },
+            {
+                "perspective": "contrarian",
+                "prompt_suffix": "Look for contrarian indicators and reasons the market consensus might be wrong."
+            }
+        ]
         
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=self.console,
         ) as progress:
-            task = progress.add_task("Researching events...", total=len(event_markets))
+            # Account for ensemble runs
+            total_research_tasks = len(event_markets) * len(research_prompts)
+            task = progress.add_task("Running ensemble research...", total=total_research_tasks)
             
             # Research events in batches to avoid rate limits
             batch_size = self.config.research_batch_size
@@ -336,39 +363,175 @@ class SimpleTradingBot:
             for i in range(0, len(event_items), batch_size):
                 batch = event_items[i:i + batch_size]
                 
-                # Research batch in parallel
-                tasks = []
+                # For each event in batch, run multiple research perspectives
                 for event_ticker, data in batch:
                     event = data['event']
                     markets = data['markets']
-                    if event and markets:
-                        tasks.append(self.research_client.research_event(event, markets))
-                
-                try:
-                    results = await asyncio.gather(*tasks, return_exceptions=True)
                     
-                    for (event_ticker, data), result in zip(batch, results):
-                        if not isinstance(result, Exception):
-                            research_results[event_ticker] = result
-                            progress.update(task, advance=1)
-                            self.console.print(f"[green]✓ Researched {event_ticker}[/green]")
-                            
-                            
+                    if not event or not markets:
+                        progress.update(task, advance=len(research_prompts))
+                        continue
+                    
+                    # Run ensemble research in parallel for this event
+                    ensemble_tasks = []
+                    for prompt_config in research_prompts:
+                        ensemble_tasks.append(
+                            self._research_with_perspective(event, markets, prompt_config)
+                        )
+                    
+                    try:
+                        ensemble_results = await asyncio.gather(*ensemble_tasks, return_exceptions=True)
+                        
+                        # Combine ensemble results
+                        successful_results = [r for r in ensemble_results if not isinstance(r, Exception)]
+                        
+                        if successful_results:
+                            # Synthesize ensemble results
+                            combined_research = self._synthesize_ensemble_research(
+                                event_ticker, successful_results, len(research_prompts)
+                            )
+                            research_results[event_ticker] = combined_research
+                            self.console.print(f"[green]✓ Ensemble research completed for {event_ticker} ({len(successful_results)}/{len(research_prompts)} perspectives)[/green]")
                         else:
-                            self.console.print(f"[red]✗ Failed to research {event_ticker}: {result}[/red]")
-                            progress.update(task, advance=1)
-                
-                except Exception as e:
-                    self.console.print(f"[red]Batch research error: {e}[/red]")
-                    progress.update(task, advance=len(batch))
+                            self.console.print(f"[red]✗ All ensemble runs failed for {event_ticker}[/red]")
+                        
+                        progress.update(task, advance=len(research_prompts))
+                        
+                    except Exception as e:
+                        self.console.print(f"[red]Ensemble research error for {event_ticker}: {e}[/red]")
+                        progress.update(task, advance=len(research_prompts))
                 
                 # Brief pause between batches
                 await asyncio.sleep(1)
         
-        self.console.print(f"[green]✓ Completed research on {len(research_results)} events[/green]")
-    
-        
+        self.console.print(f"[green]✓ Completed ensemble research on {len(research_results)} events[/green]")
         return research_results
+    
+    async def _research_with_perspective(self, event: Dict[str, Any], markets: List[Dict[str, Any]], 
+                                       prompt_config: Dict[str, str]) -> Dict[str, Any]:
+        """Research an event with a specific perspective/prompt."""
+        try:
+            # Add perspective suffix to research
+            research_result = await self.research_client.research_event(
+                event, markets, 
+                additional_context=prompt_config["prompt_suffix"]
+            )
+            return {
+                "perspective": prompt_config["perspective"],
+                "content": research_result,
+                "prompt_suffix": prompt_config["prompt_suffix"]
+            }
+        except Exception as e:
+            logger.error(f"Research failed for perspective {prompt_config['perspective']}: {e}")
+            raise
+    
+    def _synthesize_ensemble_research(self, event_ticker: str, results: List[Dict[str, Any]], 
+                                    total_perspectives: int) -> str:
+        """Synthesize multiple research perspectives into a combined analysis with variance detection."""
+        # Calculate ensemble confidence based on agreement
+        ensemble_confidence = len(results) / total_perspectives
+        
+        # Combine all research content
+        combined_parts = [
+            f"=== ENSEMBLE RESEARCH SYNTHESIS ===",
+            f"Event: {event_ticker}",
+            f"Successful perspectives: {len(results)}/{total_perspectives}",
+            f"Ensemble confidence: {ensemble_confidence:.2f}",
+            "\n"
+        ]
+        
+        # Add each perspective's research
+        for i, result in enumerate(results, 1):
+            combined_parts.append(f"--- Perspective {i}: {result['perspective']} ---")
+            combined_parts.append(f"Focus: {result['prompt_suffix']}")
+            combined_parts.append(result['content'])
+            combined_parts.append("\n")
+        
+        # Add variance analysis section
+        combined_parts.append("=== VARIANCE ANALYSIS ===")
+        combined_parts.append(f"Number of perspectives analyzed: {len(results)}")
+        combined_parts.append(f"Ensemble reliability score: {ensemble_confidence:.2f}")
+        
+        if ensemble_confidence < 0.5:
+            combined_parts.append("⚠️ LOW CONFIDENCE: Less than half of perspectives succeeded. Results may be unreliable.")
+        elif ensemble_confidence < 0.8:
+            combined_parts.append("⚡ MODERATE CONFIDENCE: Most perspectives succeeded. Some variance in analysis.")
+        else:
+            combined_parts.append("✅ HIGH CONFIDENCE: Strong consensus across perspectives.")
+        
+        combined_parts.append("\n=== END ENSEMBLE SYNTHESIS ===")
+        
+        return "\n".join(combined_parts)
+    
+    def _calculate_kelly_bet_size(self, probability: float, odds: float, bankroll: float) -> float:
+        """
+        Calculate optimal bet size using Kelly Criterion.
+        
+        Args:
+            probability: Our estimated probability of winning (0-1)
+            odds: Market odds (decimal, e.g., 2.0 for even money)
+            bankroll: Total bankroll available
+            
+        Returns:
+            Optimal bet size in dollars
+        """
+        if probability <= 0 or probability >= 1:
+            return 0.0
+        if odds <= 1:
+            return 0.0
+            
+        # Kelly formula: f = (p*b - q) / b
+        # where f = fraction of bankroll to bet
+        # p = probability of winning
+        # q = probability of losing (1-p)
+        # b = odds - 1 (net odds)
+        
+        q = 1 - probability
+        b = odds - 1
+        
+        kelly_fraction = (probability * b - q) / b
+        
+        # Apply safety constraints
+        if kelly_fraction <= 0:
+            return 0.0
+            
+        # Apply fractional Kelly (e.g., 25% of full Kelly)
+        adjusted_fraction = kelly_fraction * self.config.kelly_fraction
+        
+        # Apply maximum bet fraction constraint
+        final_fraction = min(adjusted_fraction, self.config.max_kelly_bet_fraction)
+        
+        # Calculate bet size
+        bet_size = bankroll * final_fraction
+        
+        # Apply maximum bet amount constraint
+        return min(bet_size, self.config.max_bet_amount)
+    
+    def _display_kelly_calculations(self, ticker: str, probability: float, market_price: float, 
+                                  kelly_bet: float, actual_bet: float):
+        """Display Kelly Criterion calculations for transparency."""
+        odds = 100.0 / market_price if market_price > 0 else 0
+        kelly_fraction_raw = self._calculate_kelly_fraction_raw(probability, odds)
+        
+        self.console.print(f"\n[blue]Kelly Criterion Analysis for {ticker}:[/blue]")
+        self.console.print(f"  Research probability: {probability:.1f}%")
+        self.console.print(f"  Market price: {market_price:.1f}%")
+        self.console.print(f"  Implied odds: {odds:.2f}x")
+        self.console.print(f"  Raw Kelly fraction: {kelly_fraction_raw:.2%}")
+        self.console.print(f"  Adjusted Kelly ({self.config.kelly_fraction*100:.0f}%): {kelly_fraction_raw * self.config.kelly_fraction:.2%}")
+        self.console.print(f"  Kelly bet size: ${kelly_bet:.2f}")
+        self.console.print(f"  Actual bet size: ${actual_bet:.2f}")
+    
+    def _calculate_kelly_fraction_raw(self, probability: float, odds: float) -> float:
+        """Calculate raw Kelly fraction without safety adjustments."""
+        if probability <= 0 or probability >= 1 or odds <= 1:
+            return 0.0
+        
+        p = probability / 100.0  # Convert to decimal
+        q = 1 - p
+        b = odds - 1
+        
+        return (p * b - q) / b
     
     async def _extract_probabilities_for_event(self, event_ticker: str, research_text: str, 
                                               event_markets: Dict[str, Dict[str, Any]]) -> tuple[str, Optional[ProbabilityExtraction]]:
@@ -401,13 +564,27 @@ class SimpleTradingBot:
             Research Results:
             {research_text}
             
+            IMPORTANT: This may be ENSEMBLE RESEARCH with multiple perspectives. If so:
+            1. Look for probability estimates from each perspective
+            2. Synthesize the different viewpoints into a single best estimate
+            3. Note any significant variance between perspectives in your confidence score
+            4. If perspectives disagree significantly, reduce confidence accordingly
+            
             For each market, provide:
             1. The research-based probability estimate (0-100%)
             2. Clear reasoning for that probability
             3. Confidence level in the estimate (0-1)
+               - High confidence (0.8-1.0): Strong consensus across perspectives
+               - Medium confidence (0.5-0.8): Some variance but general agreement
+               - Low confidence (0-0.5): High variance or conflicting perspectives
             
             Focus on extracting concrete probability estimates from the research, not market prices.
             If the research doesn't provide a clear probability for a market, make your best estimate based on the available information.
+            
+            When multiple perspectives are present, weight them appropriately based on:
+            - Statistical/quantitative analysis typically most reliable for probabilities
+            - News/sentiment analysis valuable for recent developments
+            - Contrarian analysis useful for identifying market inefficiencies
             """
             
             # Use GPT-4o to extract probabilities with structured output
@@ -927,6 +1104,14 @@ class SimpleTradingBot:
         - Secondary bets: Much smaller positions (≤60% of primary) only for exceptional hedge opportunities
         - Most markets: SKIP - don't bet unless there's a clear, substantial edge
         
+        KELLY CRITERION SIZING (if enabled: {self.config.enable_kelly_criterion}):
+        - Use Kelly Criterion to determine optimal bet sizes based on edge and probability
+        - Bankroll: ${self.config.bankroll}
+        - Kelly fraction: {self.config.kelly_fraction} (conservative)
+        - Max bet fraction of bankroll: {self.config.max_kelly_bet_fraction}
+        - For each bet, calculate: kelly_fraction = (p*b - q) / b where p=win_probability, b=net_odds, q=1-p
+        - Apply fractional Kelly and maximum constraints
+        
         EDGE CALCULATION:
         - Compare research predicted probability to yes_mid_price and no_mid_price
         - Look for market mispricing of 5+ percentage points
@@ -951,6 +1136,10 @@ class SimpleTradingBot:
             
             # Enrich decisions with human-readable names
             analysis = self._add_human_readable_names(analysis, event_info, markets)
+            
+            # Apply Kelly Criterion sizing if enabled
+            if self.config.enable_kelly_criterion:
+                analysis = self._apply_kelly_criterion_sizing(analysis, event_ticker, markets, probability_extraction, market_odds)
             
             # Apply alpha threshold validation to ensure minimum edge requirements
             analysis = self._apply_alpha_threshold_validation(analysis, event_ticker, markets, probability_extraction)
@@ -1007,6 +1196,99 @@ class SimpleTradingBot:
             total_recommended_bet=analysis.total_recommended_bet,
             high_confidence_bets=analysis.high_confidence_bets,
             summary=analysis.summary
+        )
+    
+    def _apply_kelly_criterion_sizing(self, analysis: MarketAnalysis, event_ticker: str,
+                                    markets: List[Dict[str, Any]], probability_extraction: ProbabilityExtraction,
+                                    market_odds: Dict[str, Dict[str, Any]]) -> MarketAnalysis:
+        """Apply Kelly Criterion to optimize bet sizing based on edge and probability."""
+        kelly_adjusted_decisions = []
+        total_kelly_bet = 0.0
+        
+        # Create lookups
+        market_lookup = {market['ticker']: market for market in markets}
+        prob_lookup = {mp.ticker: mp for mp in probability_extraction.markets}
+        
+        self.console.print(f"\n[blue]Applying Kelly Criterion sizing for {event_ticker}...[/blue]")
+        
+        for decision in analysis.decisions:
+            if decision.action == "skip" or decision.amount <= 0:
+                kelly_adjusted_decisions.append(decision)
+                continue
+            
+            # Get probability and market data
+            prob_data = prob_lookup.get(decision.ticker)
+            market_data = market_lookup.get(decision.ticker)
+            odds_data = market_odds.get(decision.ticker, {})
+            
+            if not prob_data or not market_data:
+                kelly_adjusted_decisions.append(decision)
+                continue
+            
+            # Extract relevant probabilities and prices
+            research_prob = prob_data.research_probability / 100.0  # Convert to decimal
+            
+            if decision.action == "buy_yes":
+                market_price = market_data.get('yes_mid_price', 0)
+                odds = 100.0 / market_price if market_price > 0 else 0
+            else:  # buy_no
+                market_price = market_data.get('no_mid_price', 0)
+                # For NO bets, we're betting on the opposite, so adjust probability
+                research_prob = 1 - research_prob
+                odds = 100.0 / market_price if market_price > 0 else 0
+            
+            # Calculate Kelly bet size
+            kelly_bet = self._calculate_kelly_bet_size(research_prob, odds, self.config.bankroll)
+            
+            # Show Kelly calculations for significant bets
+            if kelly_bet > 0:
+                self._display_kelly_calculations(
+                    decision.ticker, 
+                    prob_data.research_probability if decision.action == "buy_yes" else (100 - prob_data.research_probability),
+                    market_price, 
+                    kelly_bet, 
+                    min(kelly_bet, decision.amount)
+                )
+            
+            # Create adjusted decision with Kelly sizing
+            adjusted_amount = min(kelly_bet, decision.amount)  # Don't exceed original recommendation
+            
+            if adjusted_amount > 0:
+                kelly_adjusted_decisions.append(
+                    BettingDecision(
+                        ticker=decision.ticker,
+                        action=decision.action,
+                        confidence=decision.confidence,
+                        amount=adjusted_amount,
+                        reasoning=f"Kelly-sized: {decision.reasoning}",
+                        event_name=decision.event_name,
+                        market_name=decision.market_name,
+                        is_hedge=decision.is_hedge
+                    )
+                )
+                total_kelly_bet += adjusted_amount
+            else:
+                # Kelly says don't bet
+                kelly_adjusted_decisions.append(
+                    BettingDecision(
+                        ticker=decision.ticker,
+                        action="skip",
+                        confidence=decision.confidence,
+                        amount=0.0,
+                        reasoning=f"Kelly Criterion: Negative expectation. Original: {decision.reasoning}",
+                        event_name=decision.event_name,
+                        market_name=decision.market_name
+                    )
+                )
+        
+        # Recalculate high confidence bets
+        high_confidence = sum(1 for d in kelly_adjusted_decisions if d.action != "skip" and d.confidence >= 0.8)
+        
+        return MarketAnalysis(
+            decisions=kelly_adjusted_decisions,
+            total_recommended_bet=total_kelly_bet,
+            high_confidence_bets=high_confidence,
+            summary=f"Kelly-optimized: {analysis.summary}"
         )
     
     def _enforce_mutually_exclusive_constraint(self, analysis: MarketAnalysis, event_ticker: str) -> MarketAnalysis:

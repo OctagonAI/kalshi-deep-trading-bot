@@ -94,6 +94,12 @@ class BotConfig(BaseSettings):
     min_confidence_for_hedging: float = Field(default=0.6, ge=0, le=1, description="Only hedge bets with confidence below this threshold")
     max_hedge_amount: float = Field(default=50.0, description="Maximum hedge amount per bet")
     
+    # Kelly Criterion settings
+    enable_kelly_criterion: bool = Field(default=True, description="Enable Kelly Criterion for optimal bet sizing")
+    kelly_fraction: float = Field(default=0.25, ge=0, le=1, description="Fraction of Kelly to use (0.25 = 25% Kelly, conservative)")
+    max_kelly_bet_fraction: float = Field(default=0.10, ge=0, le=0.25, description="Maximum fraction of bankroll to bet on single market")
+    bankroll: float = Field(default=10000.0, description="Total bankroll for Kelly calculations")
+    
     def __init__(self, **data):
         # Build nested configs from environment variables
         
@@ -136,7 +142,12 @@ class BotConfig(BaseSettings):
             "enable_hedging": os.getenv("ENABLE_HEDGING", "true").lower() == "true",
             "hedge_ratio": float(os.getenv("HEDGE_RATIO", "0.25")),
             "min_confidence_for_hedging": float(os.getenv("MIN_CONFIDENCE_FOR_HEDGING", "0.6")),
-            "max_hedge_amount": float(os.getenv("MAX_HEDGE_AMOUNT", "50.0"))
+            "max_hedge_amount": float(os.getenv("MAX_HEDGE_AMOUNT", "50.0")),
+            # Kelly Criterion settings
+            "enable_kelly_criterion": os.getenv("ENABLE_KELLY_CRITERION", "true").lower() == "true",
+            "kelly_fraction": float(os.getenv("KELLY_FRACTION", "0.25")),
+            "max_kelly_bet_fraction": float(os.getenv("MAX_KELLY_BET_FRACTION", "0.10")),
+            "bankroll": float(os.getenv("BANKROLL", "10000.0"))
         })
         
         super().__init__(**data)

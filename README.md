@@ -34,6 +34,32 @@ The bot follows a simple 6-step workflow:
 - **Dry Run Mode**: Test the bot without placing real bets
 - **Rich Console**: Beautiful progress tracking and result display with probability predictions
 
+## Real-Time Improvements
+
+The bot now includes several advanced real-time features that don't require state persistence:
+
+### Ensemble Research
+- **Multiple Perspectives**: Runs research from 3 different angles simultaneously:
+  - Statistical: Historical data and quantitative analysis
+  - News/Sentiment: Recent developments and public sentiment
+  - Contrarian: Market inefficiencies and overlooked factors
+- **Variance Detection**: Automatically detects when perspectives disagree
+- **Consensus Building**: Synthesizes multiple viewpoints into best estimates
+- **Confidence Adjustment**: Reduces confidence when high variance detected
+
+### Kelly Criterion Bet Sizing
+- **Optimal Sizing**: Uses mathematical formula to determine ideal bet sizes
+- **Edge-Based**: Larger bets on higher-edge opportunities
+- **Risk Management**: Conservative fractional Kelly (25% default)
+- **Bankroll Protection**: Maximum bet limits to prevent overexposure
+- **Transparent Calculations**: Shows Kelly analysis for each bet
+
+### Enhanced Probability Extraction
+- **Ensemble-Aware**: Handles multiple research perspectives intelligently
+- **Variance Integration**: Confidence scores reflect perspective agreement
+- **Weighted Synthesis**: Prioritizes statistical analysis for probabilities
+- **Detailed Reasoning**: Explains how probabilities were derived
+
 ## Quick Start
 
 ### 1. Install uv (if not already installed)
@@ -100,6 +126,12 @@ HEDGE_RATIO=0.25              # Default hedge ratio (0.25 = hedge 25% of main be
 MIN_CONFIDENCE_FOR_HEDGING=0.6 # Only hedge bets with confidence below this threshold
 MAX_HEDGE_AMOUNT=50.0         # Maximum hedge amount per bet in dollars
 
+# Kelly Criterion (Optimal Bet Sizing)
+ENABLE_KELLY_CRITERION=true   # Enable Kelly Criterion for optimal bet sizing
+KELLY_FRACTION=0.25           # Fraction of Kelly to use (0.25 = 25% Kelly, conservative)
+MAX_KELLY_BET_FRACTION=0.10   # Maximum fraction of bankroll to bet on single market
+BANKROLL=10000.0              # Total bankroll for Kelly calculations
+
 # API Keys
 KALSHI_API_KEY=your_key
 KALSHI_PRIVATE_KEY=your_private_key
@@ -119,6 +151,12 @@ OPENAI_API_KEY=your_key
 - **HEDGE_RATIO**: Proportion of main bet amount to hedge on opposite side (0.25 = 25% hedge)
 - **MIN_CONFIDENCE_FOR_HEDGING**: Only hedge bets with confidence below this threshold (0.6 = hedge when confidence < 60%)  
 - **MAX_HEDGE_AMOUNT**: Maximum dollar amount per hedge bet to limit hedge costs
+
+**Kelly Criterion (Optimal Bet Sizing):**
+- **ENABLE_KELLY_CRITERION**: When enabled (default), uses Kelly formula to optimize bet sizes based on edge and probability
+- **KELLY_FRACTION**: Fraction of full Kelly to use (0.25 = 25%). Lower values are more conservative and reduce volatility
+- **MAX_KELLY_BET_FRACTION**: Maximum fraction of bankroll to risk on any single bet (0.10 = 10% max)
+- **BANKROLL**: Total available capital for Kelly calculations. Kelly will size bets as a percentage of this amount
 
 ### Trading Modes
 
@@ -174,27 +212,42 @@ OPENAI_API_KEY=your_key
 Step 1: Fetching top events...
 ✓ Found 50 events
 
-Step 2: Fetching markets for 50 events...
-✓ Found 247 total markets across 45 events
+Step 2: Processing markets for 50 events...
+✓ Processing 247 total markets across 45 events
 
-Step 3: Researching 45 events...
-✓ Researched NYC-MAYOR-2025
-Predicted probabilities for NYC-MAYOR-2025:
+Step 3: Researching 45 events with ensemble approach...
+✓ Ensemble research completed for NYC-MAYOR-2025 (3/3 perspectives)
+
+Step 3.5: Extracting probabilities from research...
+✓ Extracted probabilities for NYC-MAYOR-2025
+Extracted probabilities for NYC-MAYOR-2025:
   NYC-MAYOR-ZOHRAN: 71.0%
   NYC-MAYOR-ADAMS: 13.0%
-✓ Completed research on 42 events
 
-Step 4: Generating betting decisions...
+Step 4: Fetching current market odds...
+✓ Fetched odds for 247 markets
+
+Step 5: Generating betting decisions...
+
+Kelly Criterion Analysis for NYC-MAYOR-ZOHRAN:
+  Research probability: 71.0%
+  Market price: 32.0%
+  Implied odds: 3.12x
+  Raw Kelly fraction: 38.5%
+  Adjusted Kelly (25%): 9.6%
+  Kelly bet size: $962.50
+  Actual bet size: $100.00
+
 ✓ Generated 34 betting decisions
 
-Step 5: Placing bets...
-Bets to be placed:
-NYC-MAYOR-ZOHRAN: buy_yes $25.00
-  Reasoning: Research shows 71% probability, current market odds undervalue this candidate
-  Confidence: 0.85
+Step 6: Placing bets...
+🎯 Bets to be Placed
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Type │ Market              │ Action  │ Amount  │ Research % │ Market % │ Confidence │
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 💰 Main │ NYC-MAYOR-ZOHRAN    │ BUY YES │ $100.00 │ 71.0%     │ 32.0%   │ 0.85      │
+│         │ Reasoning: Kelly-sized: Research shows 71% probability, market at 32% (2.2x alpha) │
 
-✓ Placed buy_yes bet on NYC-MAYOR-ZOHRAN for $25.00
-  Reasoning: Research shows 71% probability, current market odds undervalue this candidate
 ✓ Successfully placed 28 bets
 ✓ Total amount bet: $1,247.50
 ```

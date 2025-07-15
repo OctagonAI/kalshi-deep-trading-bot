@@ -53,6 +53,12 @@ HEDGE_RATIO=0.25              # Default hedge ratio (0.25 = hedge 25% of main be
 MIN_CONFIDENCE_FOR_HEDGING=0.6 # Only hedge bets with confidence below this threshold (0.6 = hedge when confidence < 60%)
 MAX_HEDGE_AMOUNT=50.0         # Maximum hedge amount per bet in dollars
 
+# Kelly Criterion configuration
+ENABLE_KELLY_CRITERION=true   # Enable Kelly Criterion for optimal bet sizing
+KELLY_FRACTION=0.25           # Fraction of Kelly to use (0.25 = 25% Kelly, conservative)
+MAX_KELLY_BET_FRACTION=0.10   # Maximum fraction of bankroll to bet on single market (0.10 = 10%)
+BANKROLL=10000.0              # Total bankroll for Kelly calculations in dollars
+
 # =============================================================================
 # SETUP INSTRUCTIONS
 # =============================================================================

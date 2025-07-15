@@ -19,13 +19,15 @@ class OctagonClient:
             timeout=1800.0  # 30 minutes timeout for deep research
         )
     
-    async def research_event(self, event: Dict[str, Any], markets: List[Dict[str, Any]]) -> str:
+    async def research_event(self, event: Dict[str, Any], markets: List[Dict[str, Any]], 
+                           additional_context: Optional[str] = None) -> str:
         """
         Research an event and its markets using Octagon Deep Research.
         
         Args:
             event: Event information (title, subtitle, category, etc.)
             markets: List of markets within the event (without odds)
+            additional_context: Optional additional context/perspective for research
             
         Returns:
             Research response as a string
@@ -54,7 +56,8 @@ class OctagonClient:
                 markets_info += f"   Open: {market.get('open_time', '')}\n"
                 markets_info += f"   Close: {market.get('close_time', '')}\n\n"
             
-            prompt = f"""
+            # Build base prompt
+            base_prompt = f"""
             You are a prediction market expert. Research this event and predict the probability for each market independently.
             
             {event_info}
@@ -81,6 +84,12 @@ class OctagonClient:
             
             Format your response clearly with market tickers and probability predictions.
             """
+            
+            # Add additional context if provided
+            if additional_context:
+                prompt = f"{base_prompt}\n\nADDITIONAL RESEARCH FOCUS:\n{additional_context}"
+            else:
+                prompt = base_prompt
             
             event_ticker = event.get('event_ticker', 'UNKNOWN')
             logger.info(f"Starting deep research for event {event_ticker} (this may take several minutes)...")
