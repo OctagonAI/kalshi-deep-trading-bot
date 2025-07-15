@@ -88,6 +88,12 @@ class BotConfig(BaseSettings):
     max_markets_per_event: int = Field(default=10, description="Maximum number of markets per event to analyze (selects top N markets by volume)")
     minimum_alpha_threshold: float = Field(default=2.0, description="Minimum alpha threshold for betting (research_price / market_price must be >= this value)")
     
+    # Hedging settings
+    enable_hedging: bool = Field(default=True, description="Enable hedging to minimize risk")
+    hedge_ratio: float = Field(default=0.25, ge=0, le=0.5, description="Default hedge ratio (0.25 = hedge 25% of main bet)")
+    min_confidence_for_hedging: float = Field(default=0.6, ge=0, le=1, description="Only hedge bets with confidence below this threshold")
+    max_hedge_amount: float = Field(default=50.0, description="Maximum hedge amount per bet")
+    
     def __init__(self, **data):
         # Build nested configs from environment variables
         
@@ -125,7 +131,12 @@ class BotConfig(BaseSettings):
             "skip_existing_positions": os.getenv("SKIP_EXISTING_POSITIONS", "true").lower() == "true",
             "minimum_time_remaining_hours": float(os.getenv("MINIMUM_TIME_REMAINING_HOURS", "1.0")),
             "max_markets_per_event": int(os.getenv("MAX_MARKETS_PER_EVENT", "10")),
-            "minimum_alpha_threshold": float(os.getenv("MINIMUM_ALPHA_THRESHOLD", "2.0"))
+            "minimum_alpha_threshold": float(os.getenv("MINIMUM_ALPHA_THRESHOLD", "2.0")),
+            # Hedging settings
+            "enable_hedging": os.getenv("ENABLE_HEDGING", "true").lower() == "true",
+            "hedge_ratio": float(os.getenv("HEDGE_RATIO", "0.25")),
+            "min_confidence_for_hedging": float(os.getenv("MIN_CONFIDENCE_FOR_HEDGING", "0.6")),
+            "max_hedge_amount": float(os.getenv("MAX_HEDGE_AMOUNT", "50.0"))
         })
         
         super().__init__(**data)

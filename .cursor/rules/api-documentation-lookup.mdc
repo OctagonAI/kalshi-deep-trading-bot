@@ -1,0 +1,61 @@
+---
+alwaysApply: true
+description: "Always look up API documentation online instead of making assumptions"
+---
+
+# API Documentation Lookup Rule
+
+## Core Principle
+**Never assume API formats, response structures, or method signatures.** Always look up the actual documentation online, especially for:
+
+- API response formats and structure
+- Method signatures and parameters
+- Library-specific implementations
+- Framework-specific patterns
+- Authentication formats
+- Error handling patterns
+
+## Required Actions
+
+### 1. For API Integration Work
+- **ALWAYS** use `web_search` to look up current API documentation
+- Search for official documentation, not just examples
+- Verify the exact response structure and access patterns
+- Check for recent API changes or updates
+
+### 2. For Library/Framework Usage
+- Look up the official documentation for the specific version being used
+- Don't rely on memory of API patterns that may have changed
+- Check for breaking changes in recent versions
+
+### 3. For Error Resolution
+- When encountering API-related errors, immediately search for the correct usage pattern
+- Look up the specific error message and official solutions
+- Don't attempt multiple "fallback" approaches without understanding the root cause
+
+## Example Scenarios
+
+### ✅ Good Practice
+```
+User reports OpenAI API error: "'ParsedChoice[MarketAnalysis]' object has no attribute 'parsed'"
+→ Immediately search: "OpenAI structured outputs API response format beta.chat.completions.parse"
+→ Find official documentation showing correct format: response.choices[0].message.parsed
+→ Implement the correct solution
+```
+
+### ❌ Bad Practice
+```
+User reports OpenAI API error
+→ Guess multiple possible formats (.parsed, .message.parsed, manual JSON parsing)
+→ Implement complex fallback logic without understanding the actual API
+→ Create debugging code instead of looking up the correct format
+```
+
+## Implementation Notes
+
+- Use `web_search` tool proactively when working with any external API
+- Always cite the official documentation source when making API-related changes
+- If documentation is unclear, search for official examples or community discussions
+- When in doubt, search rather than assume
+
+This rule helps ensure reliable, maintainable code by using accurate, up-to-date API information rather than assumptions or outdated knowledge.

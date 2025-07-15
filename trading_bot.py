@@ -62,7 +62,9 @@ class SimpleTradingBot:
         self.console.print(f"[blue]Minimum time to event strike: {self.config.minimum_time_remaining_hours} hours (for events with strike_date)[/blue]")
         self.console.print(f"[blue]Max markets per event: {self.config.max_markets_per_event}[/blue]")
         self.console.print(f"[blue]Max bet amount: ${self.config.max_bet_amount}[/blue]")
-        self.console.print(f"[blue]Minimum alpha threshold: {self.config.minimum_alpha_threshold}x[/blue]\n")
+        self.console.print(f"[blue]Minimum alpha threshold: {self.config.minimum_alpha_threshold}x[/blue]")
+        hedging_status = "Enabled" if self.config.enable_hedging else "Disabled"
+        self.console.print(f"[blue]Risk hedging: {hedging_status} (ratio: {self.config.hedge_ratio}, min confidence: {self.config.min_confidence_for_hedging})[/blue]\n")
     
     async def get_top_events(self) -> List[Dict[str, Any]]:
         """Get top events sorted by 24-hour volume."""
@@ -601,6 +603,15 @@ class SimpleTradingBot:
                 
                 progress.update(task, advance=1)
         
+        # Generate hedge decisions for risk management
+        hedge_decisions = self._generate_hedge_decisions(all_decisions)
+        if hedge_decisions:
+            all_decisions.extend(hedge_decisions)
+            # Update totals to include hedge amounts
+            hedge_bet_total = sum(d.amount for d in hedge_decisions)
+            total_recommended_bet += hedge_bet_total
+            self.console.print(f"[blue]💡 Generated {len(hedge_decisions)} hedge bets (${hedge_bet_total:.2f}) for risk management[/blue]")
+        
         # Create combined analysis
         analysis = MarketAnalysis(
             decisions=all_decisions,
@@ -617,19 +628,24 @@ class SimpleTradingBot:
         # Display consolidated summary table
         if actionable_decisions:
             table = Table(title="📊 All Betting Decisions Summary", show_lines=True)
-            table.add_column("Event", style="bright_blue", width=25)
-            table.add_column("Market", style="cyan", width=35)
+            table.add_column("Type", style="bright_blue", justify="center", width=8)
+            table.add_column("Event", style="bright_blue", width=22)
+            table.add_column("Market", style="cyan", width=32)
             table.add_column("Action", style="yellow", justify="center", width=10)
             table.add_column("Confidence", style="magenta", justify="right", width=10)
             table.add_column("Amount", style="green", justify="right", width=10)
-            table.add_column("Reasoning", style="blue", width=70)
+            table.add_column("Reasoning", style="blue", width=65)
             
             for decision in actionable_decisions:
                 # Use human-readable names if available
                 event_name = decision.event_name if decision.event_name else "Unknown Event"
                 market_name = decision.market_name if decision.market_name else decision.ticker
                 
+                # Determine bet type
+                bet_type = "🛡️ Hedge" if decision.is_hedge else "💰 Main"
+                
                 table.add_row(
+                    bet_type,
                     event_name,
                     market_name,
                     decision.action.upper().replace('_', ' '),
@@ -648,6 +664,52 @@ class SimpleTradingBot:
         self.console.print(f"[blue]Strategy: {analysis.summary}[/blue]")
         
         return analysis
+    
+    def _generate_hedge_decisions(self, main_decisions: List[BettingDecision]) -> List[BettingDecision]:
+        """Generate hedge decisions to minimize risk for main betting decisions."""
+        if not self.config.enable_hedging:
+            return []
+        
+        hedge_decisions = []
+        
+        for main_decision in main_decisions:
+            # Skip if this is already a hedge or a skip
+            if main_decision.is_hedge or main_decision.action == "skip":
+                continue
+                
+            # Only hedge if confidence is below threshold (higher risk bets)
+            if main_decision.confidence >= self.config.min_confidence_for_hedging:
+                continue
+                
+            # Calculate hedge amount
+            hedge_amount = min(
+                main_decision.amount * self.config.hedge_ratio,
+                self.config.max_hedge_amount
+            )
+            
+            # Only create hedge if amount is meaningful (at least $1)
+            if hedge_amount < 1.0:
+                continue
+            
+            # Create opposite hedge position
+            hedge_action = "buy_no" if main_decision.action == "buy_yes" else "buy_yes"
+            
+            hedge_decision = BettingDecision(
+                ticker=main_decision.ticker,
+                action=hedge_action,
+                confidence=0.8,  # Hedge has high confidence (it's risk management)
+                amount=hedge_amount,
+                reasoning=f"Risk hedge: {self.config.hedge_ratio*100:.0f}% hedge for {main_decision.action} (confidence {main_decision.confidence:.2f} < {self.config.min_confidence_for_hedging:.2f})",
+                event_name=main_decision.event_name,
+                market_name=main_decision.market_name,
+                is_hedge=True,
+                hedge_for=main_decision.ticker,
+                hedge_ratio=self.config.hedge_ratio
+            )
+            
+            hedge_decisions.append(hedge_decision)
+        
+        return hedge_decisions
     
     def _display_event_decisions(self, event_ticker: str, event_analysis: MarketAnalysis):
         """Display the betting decisions for a single event."""
@@ -676,17 +738,22 @@ class SimpleTradingBot:
         # Create event-specific table
         event_name = actionable_decisions[0].event_name if actionable_decisions else "Unknown Event"
         table = Table(title=f"Betting Decisions for {event_name}", show_lines=True)
-        table.add_column("Market", style="cyan", width=45)
+        table.add_column("Type", style="bright_blue", justify="center", width=8)
+        table.add_column("Market", style="cyan", width=40)
         table.add_column("Action", style="yellow", justify="center", width=10)
         table.add_column("Confidence", style="magenta", justify="right", width=10)
         table.add_column("Amount", style="green", justify="right", width=10)
-        table.add_column("Reasoning", style="blue", width=75)
+        table.add_column("Reasoning", style="blue", width=70)
         
         for decision in actionable_decisions:
             # Use human-readable market name if available, otherwise generate from ticker
             market_display = decision.market_name if decision.market_name else self._generate_readable_market_name(decision.ticker)
             
+            # Determine bet type
+            bet_type = "🛡️ Hedge" if decision.is_hedge else "💰 Main"
+            
             table.add_row(
+                bet_type,
                 market_display,
                 decision.action.upper().replace('_', ' '),
                 f"{decision.confidence:.2f}",
@@ -1043,14 +1110,15 @@ class SimpleTradingBot:
         
         # Display bets to be placed in table format with probabilities
         table = Table(title="🎯 Bets to be Placed", show_lines=True)
-        table.add_column("Event", style="bright_blue", width=20)
-        table.add_column("Market", style="cyan", width=25)
+        table.add_column("Type", style="bright_blue", justify="center", width=8)
+        table.add_column("Event", style="bright_blue", width=18)
+        table.add_column("Market", style="cyan", width=22)
         table.add_column("Action", style="yellow", justify="center", width=8)
         table.add_column("Amount", style="green", justify="right", width=8)
         table.add_column("Research %", style="magenta", justify="right", width=10)
         table.add_column("Market %", style="red", justify="right", width=10)
         table.add_column("Confidence", style="bright_magenta", justify="right", width=10)
-        table.add_column("Reasoning", style="blue", width=45)
+        table.add_column("Reasoning", style="blue", width=40)
         
         for decision in actionable_decisions:
             # Use human-readable names if available, otherwise use ticker
@@ -1068,7 +1136,11 @@ class SimpleTradingBot:
             market_prob = self._extract_market_probability(decision.ticker, decision.action, market_odds)
             market_prob_str = f"{market_prob:.1f}%" if market_prob is not None else "N/A"
             
+            # Determine bet type
+            bet_type = "🛡️ Hedge" if decision.is_hedge else "💰 Main"
+            
             table.add_row(
+                bet_type,
                 event_name,
                 market_name,
                 decision.action.upper().replace('_', ' '),

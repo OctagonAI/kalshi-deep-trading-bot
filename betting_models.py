@@ -31,6 +31,11 @@ class BettingDecision(BaseModel):
     # Human-readable names for display
     event_name: Optional[str] = Field(None, description="Human-readable event name")
     market_name: Optional[str] = Field(None, description="Human-readable market name")
+    
+    # Hedging fields
+    is_hedge: bool = Field(False, description="Whether this is a hedge bet")
+    hedge_for: Optional[str] = Field(None, description="Ticker of the main bet this hedges")
+    hedge_ratio: Optional[float] = Field(None, ge=0, le=1, description="Proportion of main bet this hedges")
 
 
 class MarketAnalysis(BaseModel):

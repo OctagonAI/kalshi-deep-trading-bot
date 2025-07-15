@@ -1,0 +1,74 @@
+---
+globs: "*.py"
+description: "Trading bot specific API documentation and best practices"
+---
+
+# Trading Bot API Documentation Best Practices
+
+## Financial API Documentation Priority
+
+For this trading bot project, **always consult official documentation** for:
+
+### Kalshi API
+- Authentication patterns (RSA signatures, headers)
+- Market data structures and response formats
+- Order placement and position management
+- Event and market filtering parameters
+- Rate limiting and error handling
+
+### OpenAI API (Structured Outputs)
+- Current response format for `beta.chat.completions.parse`
+- Pydantic model integration patterns
+- Error handling for parsing failures
+- Token limits and model-specific features
+
+### Octagon Deep Research API
+- Request/response formats
+- Rate limiting and timeout handling
+- Authentication requirements
+- Error responses and retry patterns
+
+## Critical Areas Requiring Documentation Lookup
+
+### 1. Market Data Formats
+- **Always verify** market close times, status fields, and data structures
+- Check for API changes in market filtering and event querying
+- Confirm volume, liquidity, and pricing field formats
+
+### 2. Authentication & Security
+- Look up current authentication patterns for each API
+- Verify signature generation and header formatting
+- Check for security best practices and token management
+
+### 3. Error Handling
+- Research specific error codes and their meanings
+- Look up recommended retry strategies
+- Verify timeout and rate limiting parameters
+
+## Example Implementation Pattern
+
+```python
+# ✅ Good: Look up current OpenAI structured outputs format
+response = client.beta.chat.completions.parse(...)
+analysis = response.choices[0].message.parsed  # Based on official docs
+
+# ❌ Bad: Assume or guess API formats
+analysis = response.choices[0].parsed  # Assumption-based approach
+```
+
+## Project-Specific References
+
+Always reference these official sources:
+- [Kalshi API Documentation](https://docs.kalshi.com/)
+- [OpenAI API Reference](https://platform.openai.com/docs/api-reference)
+- [Octagon API Documentation](https://docs.octagon.ai/)
+
+## Risk Considerations
+
+Financial trading APIs change frequently. **Never assume** that:
+- Market data formats remain constant
+- Authentication patterns are unchanged
+- Error handling approaches are still valid
+- Rate limits and timeouts are the same
+
+When in doubt, search for the current documentation rather than relying on examples or memory.

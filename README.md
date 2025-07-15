@@ -94,6 +94,12 @@ MAX_BET_AMOUNT=25.0           # Maximum bet per market
 RESEARCH_BATCH_SIZE=10        # Number of parallel deep research requests
 SKIP_EXISTING_POSITIONS=true # Skip betting on markets where we already have positions
 
+# Risk Management / Hedging
+ENABLE_HEDGING=true           # Enable hedging to minimize risk and protect downside
+HEDGE_RATIO=0.25              # Default hedge ratio (0.25 = hedge 25% of main bet on opposite side)
+MIN_CONFIDENCE_FOR_HEDGING=0.6 # Only hedge bets with confidence below this threshold
+MAX_HEDGE_AMOUNT=50.0         # Maximum hedge amount per bet in dollars
+
 # API Keys
 KALSHI_API_KEY=your_key
 KALSHI_PRIVATE_KEY=your_private_key
@@ -107,6 +113,12 @@ OPENAI_API_KEY=your_key
 - **RESEARCH_BATCH_SIZE**: Controls how many deep research requests are sent in parallel. Higher values process faster but may hit rate limits. Recommended range: 1-20.
 - **SKIP_EXISTING_POSITIONS**: When enabled (default), the bot will skip betting on markets where you already have positions to avoid duplicate trades.
 - **MAX_MARKETS_PER_EVENT**: Controls how many markets per event to analyze (default: 10). For events with many markets, selects the top N markets by volume to keep context manageable.
+
+**Risk Management & Hedging:**
+- **ENABLE_HEDGING**: When enabled (default), automatically generates hedge bets to minimize downside risk
+- **HEDGE_RATIO**: Proportion of main bet amount to hedge on opposite side (0.25 = 25% hedge)
+- **MIN_CONFIDENCE_FOR_HEDGING**: Only hedge bets with confidence below this threshold (0.6 = hedge when confidence < 60%)  
+- **MAX_HEDGE_AMOUNT**: Maximum dollar amount per hedge bet to limit hedge costs
 
 ### Trading Modes
 

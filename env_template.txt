@@ -47,6 +47,12 @@ MINIMUM_TIME_REMAINING_HOURS=1.0  # Minimum hours remaining before event strike 
 MAX_MARKETS_PER_EVENT=10     # Maximum number of markets per event to analyze (selects top N markets by volume)
 MINIMUM_ALPHA_THRESHOLD=2.0  # Minimum alpha threshold for betting (research_price / market_price must be >= this value)
 
+# Risk management / hedging configuration
+ENABLE_HEDGING=true           # Enable hedging to minimize risk and protect downside
+HEDGE_RATIO=0.25              # Default hedge ratio (0.25 = hedge 25% of main bet on opposite side)
+MIN_CONFIDENCE_FOR_HEDGING=0.6 # Only hedge bets with confidence below this threshold (0.6 = hedge when confidence < 60%)
+MAX_HEDGE_AMOUNT=50.0         # Maximum hedge amount per bet in dollars
+
 # =============================================================================
 # SETUP INSTRUCTIONS
 # =============================================================================
