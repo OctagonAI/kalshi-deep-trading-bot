@@ -2,6 +2,8 @@
 
 A straightforward trading bot for Kalshi prediction markets that uses Octagon Deep Research for market analysis and OpenAI for structured betting decisions.
 
+![Trading Bot Flowchart](KalshiDeepTradingBot.png)
+
 ## ⚠️ Financial Disclaimer
 
 **IMPORTANT: This software is provided for educational and research purposes only. Trading prediction markets involves significant financial risk.**
