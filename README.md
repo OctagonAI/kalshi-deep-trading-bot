@@ -4,6 +4,8 @@ A straightforward trading bot for Kalshi prediction markets that uses Octagon De
 
 ![Trading Bot Flowchart](KalshiDeepTradingBot.png)
 
+![Trading Bot Research Example](research-example.png)
+
 ## ⚠️ Financial Disclaimer
 
 **IMPORTANT: This software is provided for educational and research purposes only. Trading prediction markets involves significant financial risk.**
