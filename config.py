@@ -69,9 +69,14 @@ class OpenAIConfig(BaseModel):
             raise ValueError("OPENAI_API_KEY is required. Please set it in your .env file.")
         return v
 
+def _clean_env_value(value: str) -> str:
+    """Clean environment variable value by removing inline comments."""
+    # Split on '#' and take the first part, then strip whitespace
+    return value.split('#')[0].strip()
+
 class BotConfig(BaseSettings):
     """Main bot configuration."""
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra='allow')
     
     # API configurations
     kalshi: KalshiConfig = Field(..., description="Kalshi configuration")
@@ -125,18 +130,23 @@ class BotConfig(BaseSettings):
             "octagon": octagon_config,
             "openai": openai_config,
             "dry_run": True,  # Default to dry run, overridden by CLI
-            "max_bet_amount": float(os.getenv("MAX_BET_AMOUNT", "100.0")),
-            "max_events_to_analyze": int(os.getenv("MAX_EVENTS_TO_ANALYZE", "50")),
-            "research_batch_size": int(os.getenv("RESEARCH_BATCH_SIZE", "10")),
-            "skip_existing_positions": os.getenv("SKIP_EXISTING_POSITIONS", "true").lower() == "true",
-            "minimum_time_remaining_hours": float(os.getenv("MINIMUM_TIME_REMAINING_HOURS", "1.0")),
-            "max_markets_per_event": int(os.getenv("MAX_MARKETS_PER_EVENT", "10")),
-            "minimum_alpha_threshold": float(os.getenv("MINIMUM_ALPHA_THRESHOLD", "2.0")),
+            "max_bet_amount": float(_clean_env_value(os.getenv("MAX_BET_AMOUNT", "100.0"))),
+            "max_events_to_analyze": int(_clean_env_value(os.getenv("MAX_EVENTS_TO_ANALYZE", "50"))),
+            "research_batch_size": int(_clean_env_value(os.getenv("RESEARCH_BATCH_SIZE", "10"))),
+            "skip_existing_positions": _clean_env_value(os.getenv("SKIP_EXISTING_POSITIONS", "true")).lower() == "true",
+            "minimum_time_remaining_hours": float(_clean_env_value(os.getenv("MINIMUM_TIME_REMAINING_HOURS", "1.0"))),
+            "max_markets_per_event": int(_clean_env_value(os.getenv("MAX_MARKETS_PER_EVENT", "10"))),
+            "minimum_alpha_threshold": float(_clean_env_value(os.getenv("MINIMUM_ALPHA_THRESHOLD", "2.0"))),
             # Hedging settings
-            "enable_hedging": os.getenv("ENABLE_HEDGING", "true").lower() == "true",
-            "hedge_ratio": float(os.getenv("HEDGE_RATIO", "0.25")),
-            "min_confidence_for_hedging": float(os.getenv("MIN_CONFIDENCE_FOR_HEDGING", "0.6")),
-            "max_hedge_amount": float(os.getenv("MAX_HEDGE_AMOUNT", "50.0"))
+            "enable_hedging": _clean_env_value(os.getenv("ENABLE_HEDGING", "true")).lower() == "true",
+            "hedge_ratio": float(_clean_env_value(os.getenv("HEDGE_RATIO", "0.25"))),
+            "min_confidence_for_hedging": float(_clean_env_value(os.getenv("MIN_CONFIDENCE_FOR_HEDGING", "0.6"))),
+            "max_hedge_amount": float(_clean_env_value(os.getenv("MAX_HEDGE_AMOUNT", "50.0"))),
+            # Kelly criterion settings (as extra fields)
+            "enable_kelly_criterion": _clean_env_value(os.getenv("ENABLE_KELLY_CRITERION", "false")).lower() == "true",
+            "kelly_fraction": float(_clean_env_value(os.getenv("KELLY_FRACTION", "0.25"))),
+            "max_kelly_bet_fraction": float(_clean_env_value(os.getenv("MAX_KELLY_BET_FRACTION", "0.1"))),
+            "bankroll": float(_clean_env_value(os.getenv("BANKROLL", "1000.0")))
         })
         
         super().__init__(**data)
