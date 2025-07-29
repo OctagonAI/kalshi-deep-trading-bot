@@ -2,24 +2,23 @@
 Simple Kalshi trading bot with Octagon research and OpenAI decision making.
 """
 import asyncio
-import json
-import re
-import sys
 import argparse
-from typing import List, Dict, Any, Optional
-from loguru import logger
+import json
+import csv
+import os
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, Any, List, Optional
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.panel import Panel
-from rich.layout import Layout
-from rich.live import Live
-import openai
+from loguru import logger
 
-from config import load_config
 from kalshi_client import KalshiClient
 from research_client import OctagonClient
-from betting_models import BettingDecision, MarketAnalysis, MarketProbability, ProbabilityExtraction
+from betting_models import BettingDecision, MarketAnalysis, ProbabilityExtraction
+from config import load_config
+import openai
 
 
 class SimpleTradingBot:
@@ -1010,476 +1009,177 @@ class SimpleTradingBot:
         )
     
     def _enforce_mutually_exclusive_constraint(self, analysis: MarketAnalysis, event_ticker: str) -> MarketAnalysis:
-        """Validate and optimize betting strategy for mutually exclusive events."""
-        yes_bets = [d for d in analysis.decisions if d.action == "buy_yes"]
-        no_bets = [d for d in analysis.decisions if d.action == "buy_no"]
-        skip_bets = [d for d in analysis.decisions if d.action == "skip"]
-        
-        # If no multiple YES bets, return as-is (already fine)
-        if len(yes_bets) <= 1:
-            return analysis
-        
-        # For mutually exclusive events with multiple YES bets, validate position sizing
-        # Sort YES bets by value (confidence * amount as proxy for expected value)
-        yes_bets_sorted = sorted(yes_bets, key=lambda d: d.confidence * d.amount, reverse=True)
-        
-        # Check if position sizing makes strategic sense
-        # Primary bet should be significantly larger than secondary bets
-        primary_bet = yes_bets_sorted[0]
-        secondary_bets = yes_bets_sorted[1:]
-        
-        # Calculate position sizing ratios
-        primary_value = primary_bet.confidence * primary_bet.amount
-        modified_decisions = []
-        valid_secondary_bets = []
-        
-        for decision in analysis.decisions:
-            if decision.action == "buy_yes" and decision.ticker != primary_bet.ticker:
-                secondary_value = decision.confidence * decision.amount
-                
-                # Allow secondary YES bets if they're appropriately sized relative to primary
-                # Secondary bets should be smaller (< 80% of primary bet value)
-                if secondary_value < (primary_value * 0.8):
-                    valid_secondary_bets.append(decision)
-                    modified_decisions.append(decision)
-                else:
-                    # Convert oversized secondary bets to smaller positions
-                    adjusted_amount = min(decision.amount, primary_bet.amount * 0.6)
-                    adjusted_decision = BettingDecision(
-                        ticker=decision.ticker,
-                        action=decision.action,
-                        confidence=decision.confidence,
-                        amount=adjusted_amount,
-                        reasoning=f"Mutually exclusive hedge: reduced position size for strategic betting. {decision.reasoning}",
-                        event_name=decision.event_name,
-                        market_name=decision.market_name
-                    )
-                    valid_secondary_bets.append(adjusted_decision)
-                    modified_decisions.append(adjusted_decision)
-            else:
-                # Keep primary YES bet, NO bets, and skip decisions as-is
-                modified_decisions.append(decision)
-        
-        # Recalculate totals
-        new_total_bet = sum(d.amount for d in modified_decisions if d.action != "skip")
-        new_high_confidence = sum(1 for d in modified_decisions if d.action != "skip" and d.confidence >= 0.8)
-        
-        # Log the strategy
-        logger.info(f"Mutually exclusive strategic betting for {event_ticker}: "
-                   f"Primary YES bet: {primary_bet.ticker} (${primary_bet.amount}), "
-                   f"Secondary YES bets: {len(valid_secondary_bets)}, "
-                   f"NO bets: {len(no_bets)}")
-        
-        return MarketAnalysis(
-            decisions=modified_decisions,
-            total_recommended_bet=new_total_bet,
-            high_confidence_bets=new_high_confidence,
-            summary=f"Strategic hedge betting: 1 primary + {len(valid_secondary_bets)} secondary YES bets, {len(no_bets)} NO bets"
-        )
-    
-    async def place_bets(self, analysis: MarketAnalysis, market_odds: Dict[str, Dict[str, Any]], 
-                        probability_extractions: Dict[str, ProbabilityExtraction]):
-        """Place bets based on the analysis with enhanced table showing probabilities."""
-        self.console.print(f"\n[bold]Step 6: Placing bets...[/bold]")
-        
-        if not analysis.decisions:
-            self.console.print("[yellow]No betting decisions to execute[/yellow]")
-            return
-        
-        # Filter to only actionable decisions
-        actionable_decisions = [
-            decision for decision in analysis.decisions 
-            if decision.action != "skip" and decision.amount > 0
-        ]
-        
-        if not actionable_decisions:
-            self.console.print("[yellow]No actionable bets to place[/yellow]")
-            return
-        
-        if self.config.dry_run:
-            self.console.print("[yellow]DRY RUN MODE - No actual bets will be placed[/yellow]")
-        
-        placed_bets = 0
-        total_bet = 0.0
-        
-        # Create a lookup for probability data across all events
-        prob_lookup = {}
-        for event_ticker, prob_extraction in probability_extractions.items():
-            for market_prob in prob_extraction.markets:
-                prob_lookup[market_prob.ticker] = market_prob
-        
-        # Display bets to be placed in table format with probabilities
-        table = Table(title="🎯 Bets to be Placed", show_lines=True)
-        table.add_column("Type", style="bright_blue", justify="center", width=8)
-        table.add_column("Event", style="bright_blue", width=18)
-        table.add_column("Market", style="cyan", width=22)
-        table.add_column("Action", style="yellow", justify="center", width=8)
-        table.add_column("Amount", style="green", justify="right", width=8)
-        table.add_column("Research %", style="magenta", justify="right", width=10)
-        table.add_column("Market %", style="red", justify="right", width=10)
-        table.add_column("Confidence", style="bright_magenta", justify="right", width=10)
-        table.add_column("Reasoning", style="blue", width=40)
-        
-        for decision in actionable_decisions:
-            # Use human-readable names if available, otherwise use ticker
-            event_name = decision.event_name if decision.event_name else "Unknown Event"
-            market_name = decision.market_name if decision.market_name else decision.ticker
-            
-            # Get structured research probability (raw, not confidence-scaled)
-            prob_data = prob_lookup.get(decision.ticker)
-            if prob_data:
-                research_prob_str = f"{prob_data.research_probability:.1f}%"
-            else:
-                research_prob_str = "N/A"
-            
-            # Extract market probability from market odds
-            market_prob = self._extract_market_probability(decision.ticker, decision.action, market_odds)
-            market_prob_str = f"{market_prob:.1f}%" if market_prob is not None else "N/A"
-            
-            # Determine bet type
-            bet_type = "🛡️ Hedge" if decision.is_hedge else "💰 Main"
-            
-            table.add_row(
-                bet_type,
-                event_name,
-                market_name,
-                decision.action.upper().replace('_', ' '),
-                f"${decision.amount:.2f}",
-                research_prob_str,
-                market_prob_str,
-                f"{decision.confidence:.2f}",
-                decision.reasoning
-            )
-        
-        self.console.print(table)
-        
-        # Show betting summary
-        total_amount = sum(decision.amount for decision in actionable_decisions)
-        self.console.print(f"\n[blue]Total bets to place: {len(actionable_decisions)} | Total amount: ${total_amount:.2f}[/blue]")
-        
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=self.console,
-        ) as progress:
-            task = progress.add_task("Placing bets...", total=len(actionable_decisions))
-            
-            for decision in actionable_decisions:
-                try:
-                    # Position checking already done earlier in filter_markets_by_positions()
-                    
-                    if self.config.dry_run:
-                        # Simulate bet placement
-                        self.console.print(f"[yellow]DRY RUN: Would place {decision.action} bet on {decision.ticker} for ${decision.amount:.2f}[/yellow]")
-                        placed_bets += 1
-                        total_bet += decision.amount
-                    else:
-                        # Place actual bet
-                        side = "yes" if decision.action == "buy_yes" else "no"
-                        result = await self.kalshi_client.place_order(
-                            ticker=decision.ticker,
-                            side=side,
-                            amount=decision.amount
-                        )
-                        
-                        if result.get('success', False):
-                            self.console.print(f"[green]✓ Placed {decision.action} bet on {decision.ticker} for ${decision.amount:.2f}[/green]")
-                            placed_bets += 1
-                            total_bet += decision.amount
-                        else:
-                            self.console.print(f"[red]✗ Failed to place bet on {decision.ticker}: {result.get('error', 'Unknown error')}[/red]")
-                    
-                    progress.update(task, advance=1)
-                    
-                except Exception as e:
-                    self.console.print(f"[red]Error placing bet on {decision.ticker}: {e}[/red]")
-                    progress.update(task, advance=1)
-                
-                # Brief pause between bets
-                await asyncio.sleep(0.5)
-        
-        # Summary
-        self.console.print(f"\n[green]✓ Successfully placed {placed_bets} bets[/green]")
-        self.console.print(f"[green]✓ Total amount bet: ${total_bet:.2f}[/green]")
-    
-    def _extract_market_name_from_ticker(self, ticker: str) -> str:
-        """Extract a readable market name from ticker as fallback."""
-        # Remove common prefixes to make it more readable
-        if '-' in ticker:
-            parts = ticker.split('-')
-            if len(parts) >= 3:
-                return f"{parts[0]}-{parts[1]}-{parts[-1]}"
-        return ticker
-    
-    def _generate_readable_market_name(self, ticker: str) -> str:
-        """Generate a readable market name from ticker when original title isn't available."""
-        # Extract the market-specific part after the event ticker
-        parts = ticker.split('-')
-        if len(parts) >= 3:
-            # For tickers like KXMLBHRDERBY-25-CRAL, extract CRAL
-            market_code = parts[-1]
-            
-            # Try to make common codes more readable
-            readable_names = {
-                'CRAL': 'Carlos Correa',
-                'JWOO': 'James Wood', 
-                'OCRU': 'Oneil Cruz',
-                'MOLS': 'Matt Olson',
-                'BBUX': 'Byron Buxton',
-                'JCHI': 'Jazz Chisholm Jr.',
-                'JAC': 'Jacquemot',
-                'SHA': 'Sharma',
-                'ROM': 'Romero Gormaz',
-                'LYS': 'Lys',
-                'EADA': 'Eric Adams',
-                'D': 'Democrat',
-                'R': 'Republican',
-                'AC': 'Andrew Cuomo'
-            }
-            
-            if market_code in readable_names:
-                return f"Will {readable_names[market_code]} win?"
-            else:
-                return f"Market {market_code}"
-        
-        # Fallback to ticker if we can't parse it
-        return ticker
-    
-    def _apply_strategic_filtering(self, analysis: MarketAnalysis, event_ticker: str) -> MarketAnalysis:
-        """Apply strategic filtering to ensure selective, high-quality betting."""
+        """Ensure only one YES bet for mutually exclusive events."""
         actionable_decisions = [d for d in analysis.decisions if d.action != "skip"]
+        yes_bets = [d for d in actionable_decisions if d.action == "buy_yes"]
         
-        if not actionable_decisions:
+        if len(yes_bets) <= 1:
+            # Already compliant or no YES bets
             return analysis
         
-        # Calculate value scores for each decision (edge × confidence approximation)
-        scored_decisions = []
-        for decision in actionable_decisions:
-            # Estimate edge based on confidence and amount (higher confidence and amount suggests better edge)
-            value_score = decision.confidence * decision.amount
-            scored_decisions.append((value_score, decision))
+        # Multiple YES bets found - keep only the highest confidence one
+        logger.warning(f"Event {event_ticker}: Multiple YES bets found in mutually exclusive event. Keeping only highest confidence bet.")
         
-        # Sort by value score (highest first)
-        scored_decisions.sort(key=lambda x: x[0], reverse=True)
+        # Sort YES bets by confidence (highest first)
+        yes_bets.sort(key=lambda x: x.confidence, reverse=True)
+        best_yes_bet = yes_bets[0]
         
-        # Apply strategic filtering rules
+        # Convert other YES bets to SKIP
         filtered_decisions = []
-        skip_decisions = []
-        
-        # Rule 1: Maximum 2 bets per event
-        max_bets = 2
-        
-        # Rule 2: Primary bet should be high confidence (>0.75) and substantial amount
-        primary_threshold = 0.75
-        hedge_threshold = 0.85
-        
-        for i, (score, decision) in enumerate(scored_decisions):
-            if i == 0:
-                # Primary position: must meet higher standards
-                if decision.confidence >= primary_threshold and decision.amount >= self.config.max_bet_amount * 0.4:
-                    filtered_decisions.append(decision)
-                else:
-                    skip_decisions.append(BettingDecision(
-                        ticker=decision.ticker,
-                        action="skip",
-                        confidence=decision.confidence,
-                        amount=0.0,
-                        reasoning=f"Strategic filter: Primary position needs confidence ≥{primary_threshold} and substantial amount. Original: {decision.reasoning}",
-                        event_name=decision.event_name,
-                        market_name=decision.market_name
-                    ))
-            elif i == 1 and len(filtered_decisions) > 0:
-                # Secondary position: must be exceptional and smaller than primary
-                primary_amount = filtered_decisions[0].amount
-                if (decision.confidence >= hedge_threshold and 
-                    decision.amount <= primary_amount * 0.6):
-                    filtered_decisions.append(decision)
-                else:
-                    skip_decisions.append(BettingDecision(
-                        ticker=decision.ticker,
-                        action="skip",
-                        confidence=decision.confidence,
-                        amount=0.0,
-                        reasoning=f"Strategic filter: Secondary position needs confidence ≥{hedge_threshold} and amount ≤60% of primary. Original: {decision.reasoning}",
-                        event_name=decision.event_name,
-                        market_name=decision.market_name
-                    ))
-            else:
-                # Skip additional positions
-                skip_decisions.append(BettingDecision(
+        for decision in analysis.decisions:
+            if decision.action == "buy_yes" and decision.ticker != best_yes_bet.ticker:
+                # Convert to skip
+                skip_decision = BettingDecision(
                     ticker=decision.ticker,
                     action="skip",
                     confidence=decision.confidence,
                     amount=0.0,
-                    reasoning=f"Strategic filter: Limited to {max_bets} bets per event, focusing on highest value opportunities. Original: {decision.reasoning}",
+                    reasoning=f"Skipped due to mutually exclusive constraint (kept {best_yes_bet.ticker} with higher confidence)",
                     event_name=decision.event_name,
                     market_name=decision.market_name
-                ))
+                )
+                filtered_decisions.append(skip_decision)
+            else:
+                filtered_decisions.append(decision)
         
-        # Add back the original skip decisions
-        original_skips = [d for d in analysis.decisions if d.action == "skip"]
-        all_decisions = filtered_decisions + skip_decisions + original_skips
+        # Update the analysis
+        analysis.decisions = filtered_decisions
         
         # Recalculate totals
-        new_total_bet = sum(d.amount for d in all_decisions if d.action != "skip")
-        new_high_confidence = sum(1 for d in all_decisions if d.action != "skip" and d.confidence >= 0.8)
+        analysis.total_recommended_bet = sum(d.amount for d in filtered_decisions)
+        analysis.high_confidence_bets = len([d for d in filtered_decisions if d.action != "skip" and d.confidence > 0.7])
         
-        # Log the filtering results
-        logger.info(f"Strategic filtering for {event_ticker}: "
-                   f"reduced from {len(actionable_decisions)} to {len(filtered_decisions)} bets "
-                   f"(kept top {len(filtered_decisions)} highest-value opportunities)")
+        return analysis
+
+    def save_betting_decisions_to_csv(self, 
+                                    analysis: MarketAnalysis, 
+                                    research_results: Dict[str, str],
+                                    probability_extractions: Dict[str, ProbabilityExtraction],
+                                    market_odds: Dict[str, Dict[str, Any]],
+                                    event_markets: Dict[str, Dict[str, Any]]) -> str:
+        """
+        Save betting decisions to a timestamped CSV file including raw research data.
         
-        return MarketAnalysis(
-            decisions=all_decisions,
-            total_recommended_bet=new_total_bet,
-            high_confidence_bets=new_high_confidence,
-            summary=f"Strategic betting: {len(filtered_decisions)} high-value positions selected from {len(actionable_decisions)} opportunities"
-        )
-    
-    def _apply_alpha_threshold_validation(self, analysis: MarketAnalysis, event_ticker: str, 
-                                        markets: List[Dict[str, Any]], 
-                                        probability_extraction: ProbabilityExtraction) -> MarketAnalysis:
-        """Apply minimum alpha threshold validation to ensure only high-alpha opportunities are bet on."""
-        validated_decisions = []
-        skip_decisions = []
+        Args:
+            analysis: The final betting decisions
+            research_results: Raw research results by event ticker
+            probability_extractions: Structured probability data by event ticker
+            market_odds: Current market odds
+            event_markets: Event and market information
+            
+        Returns:
+            str: Path to the created CSV file
+        """
+        # Create output directory
+        output_dir = Path("betting_decisions")
+        output_dir.mkdir(exist_ok=True)
         
-        # Create a lookup for market data by ticker
-        market_lookup = {market['ticker']: market for market in markets}
+        # Generate timestamp for filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"betting_decisions_{timestamp}.csv"
+        filepath = output_dir / filename
         
-        # Create a lookup for probability data by ticker
-        prob_lookup = {mp.ticker: mp for mp in probability_extraction.markets}
+        # Prepare CSV data
+        csv_data = []
         
         for decision in analysis.decisions:
-            if decision.action == "skip":
-                validated_decisions.append(decision)
-                continue
+            # Find corresponding research and market data
+            event_ticker = None
+            raw_research = ""
+            research_summary = ""
+            research_probability = None
+            research_reasoning = ""
+            market_yes_price = None
+            market_no_price = None
+            event_title = ""
+            market_title = ""
             
-            # Get market data for this ticker
-            market_data = market_lookup.get(decision.ticker)
-            if not market_data:
-                logger.warning(f"Could not find market data for {decision.ticker}")
-                validated_decisions.append(decision)
-                continue
+            # Find the event ticker for this market
+            for evt_ticker, data in event_markets.items():
+                for market in data['markets']:
+                    if market.get('ticker') == decision.ticker:
+                        event_ticker = evt_ticker
+                        event_title = data['event'].get('title', '')
+                        market_title = market.get('title', '')
+                        break
+                if event_ticker:
+                    break
             
-            # Get probability data for this ticker
-            prob_data = prob_lookup.get(decision.ticker)
-            if not prob_data:
-                logger.warning(f"Could not find probability data for {decision.ticker}")
-                validated_decisions.append(decision)
-                continue
+            # Get raw research
+            if event_ticker and event_ticker in research_results:
+                raw_research = research_results[event_ticker]
             
-            # Check if alpha threshold is met
-            if self._meets_alpha_threshold(decision, market_data, prob_data):
-                validated_decisions.append(decision)
-            else:
-                # Get relevant market price for error message
-                market_price = market_data.get('yes_mid_price', 0) if decision.action == "buy_yes" else market_data.get('no_mid_price', 0)
+            # Get probability extraction data
+            if event_ticker and event_ticker in probability_extractions:
+                extraction = probability_extractions[event_ticker]
+                research_summary = extraction.overall_summary
                 
-                # Convert to skip decision with alpha threshold reasoning
-                skip_decisions.append(BettingDecision(
-                    ticker=decision.ticker,
-                    action="skip",
-                    confidence=decision.confidence,
-                    amount=0.0,
-                    reasoning=f"Alpha threshold not met (requires {self.config.minimum_alpha_threshold}x difference). Research: {prob_data.research_probability:.1f}%, Market: {market_price:.1f}%",
-                    event_name=decision.event_name,
-                    market_name=decision.market_name
-                ))
+                # Find market-specific probability
+                for market_prob in extraction.markets:
+                    if market_prob.ticker == decision.ticker:
+                        research_probability = market_prob.research_probability
+                        research_reasoning = market_prob.reasoning
+                        break
+            
+            # Get market odds
+            if decision.ticker in market_odds:
+                odds = market_odds[decision.ticker]
+                market_yes_price = odds.get('yes_mid_price')
+                market_no_price = odds.get('no_mid_price')
+            
+            # Calculate edge if we have the necessary data
+            edge_percentage = None
+            if research_probability is not None:
+                if decision.action == "buy_yes" and market_yes_price is not None:
+                    edge_percentage = research_probability - market_yes_price
+                elif decision.action == "buy_no" and market_no_price is not None:
+                    # For NO bets, edge is (100 - research_probability) - market_no_price
+                    edge_percentage = (100 - research_probability) - market_no_price
+            
+            csv_row = {
+                'timestamp': datetime.now().isoformat(),
+                'event_ticker': event_ticker or '',
+                'event_title': event_title,
+                'market_ticker': decision.ticker,
+                'market_title': market_title,
+                'action': decision.action,
+                'bet_amount': decision.amount,
+                'confidence': decision.confidence,
+                'reasoning': decision.reasoning,
+                'research_probability': research_probability,
+                'research_reasoning': research_reasoning,
+                'market_yes_price': market_yes_price,
+                'market_no_price': market_no_price,
+                'edge_percentage': edge_percentage,
+                'is_hedge': decision.is_hedge,
+                'hedge_for': decision.hedge_for or '',
+                'research_summary': research_summary,
+                'raw_research': raw_research.replace('\n', ' ').replace('\r', ' ') if raw_research else ''
+            }
+            csv_data.append(csv_row)
         
-        # Show alpha threshold filtering results
-        if skip_decisions:
-            logger.info(f"Alpha threshold filter for {event_ticker}: {len(skip_decisions)} bets skipped for insufficient alpha")
+        # Write to CSV
+        if csv_data:
+            fieldnames = [
+                'timestamp', 'event_ticker', 'event_title', 'market_ticker', 'market_title',
+                'action', 'bet_amount', 'confidence', 'reasoning', 'research_probability',
+                'research_reasoning', 'market_yes_price', 'market_no_price', 'edge_percentage',
+                'is_hedge', 'hedge_for', 'research_summary', 'raw_research'
+            ]
+            
+            with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(csv_data)
+            
+            logger.info(f"Saved {len(csv_data)} betting decisions to {filepath}")
+            self.console.print(f"[bold green]✓[/bold green] Betting decisions saved to: [blue]{filepath}[/blue]")
+        else:
+            logger.warning("No betting decisions to save")
+            self.console.print("[yellow]No betting decisions to save[/yellow]")
         
-        # Update analysis with validated decisions
-        validated_analysis = MarketAnalysis(
-            decisions=validated_decisions + skip_decisions,
-            total_recommended_bet=sum(d.amount for d in validated_decisions if d.action != "skip"),
-            high_confidence_bets=len([d for d in validated_decisions if d.action != "skip" and d.confidence > 0.7]),
-            summary=analysis.summary
-        )
-        
-        return validated_analysis
-    
-    def _meets_alpha_threshold(self, decision: BettingDecision, market_data: Dict[str, Any], prob_data: MarketProbability) -> bool:
-        """Check if a betting decision meets the minimum alpha threshold.
-        
-        Note: This uses raw research probabilities. If calibration issues are identified,
-        the proper approach is to:
-        1. Generate a reliability diagram on validation data
-        2. Apply Platt scaling or isotonic regression if needed
-        3. Use calibrated probabilities, not ad-hoc scaling
-        
-        Simply multiplying probabilities by confidence scores introduces bias and
-        doesn't address the underlying calibration problem.
-        """
-        # Get market odds
-        yes_mid_price = market_data.get('yes_mid_price', 0)
-        no_mid_price = market_data.get('no_mid_price', 0)
-        
-        # Use raw research probability (not confidence-scaled)
-        research_probability = prob_data.research_probability
-        confidence = prob_data.confidence
-        
-        if research_probability is None:
-            logger.warning(f"Could not extract research probability from probability_extraction: {prob_data.reasoning}")
-            return True  # Allow bet if we can't determine probability
-        
-        # Convert to decimal (0-1 range) - using raw research probability
-        research_prob = research_probability / 100.0
-        market_yes_price = yes_mid_price / 100.0
-        market_no_price = no_mid_price / 100.0
-        
-        if decision.action == "buy_yes":
-            # For YES bets: research probability should be >= market_price * alpha_threshold
-            if market_yes_price > 0:
-                alpha_ratio = research_prob / market_yes_price
-                logger.debug(f"YES bet alpha check for {decision.ticker}: "
-                            f"research={research_probability:.1f}%, confidence={confidence:.2f}, "
-                            f"market={market_yes_price*100:.1f}%, "
-                            f"alpha={alpha_ratio:.2f}x, required={self.config.minimum_alpha_threshold}x")
-                return alpha_ratio >= self.config.minimum_alpha_threshold
-            else:
-                return True  # Allow if market price is 0 (extreme edge case)
-        
-        elif decision.action == "buy_no":
-            # For NO bets: research probability should be <= market_no_price / alpha_threshold
-            if research_prob > 0:
-                alpha_ratio = market_no_price / research_prob
-                logger.debug(f"NO bet alpha check for {decision.ticker}: "
-                            f"research={research_probability:.1f}%, confidence={confidence:.2f}, "
-                            f"market_no={market_no_price*100:.1f}%, "
-                            f"alpha={alpha_ratio:.2f}x, required={self.config.minimum_alpha_threshold}x")
-                return alpha_ratio >= self.config.minimum_alpha_threshold
-            else:
-                return True  # Allow if research probability is 0 (extreme edge case)
-        
-        return True  # Default to allow if action is unclear
-    
-    def _extract_market_probability(self, ticker: str, action: str, market_odds: Dict[str, Dict[str, Any]]) -> Optional[float]:
-        """Extract market probability from market odds based on the action."""
-        odds = market_odds.get(ticker, {})
-        
-        if not odds:
-            logger.debug(f"No odds found for ticker {ticker}")
-            return None
-        
-        # Calculate mid-prices from bid/ask
-        yes_bid = odds.get('yes_bid', 0)
-        no_bid = odds.get('no_bid', 0)
-        yes_ask = odds.get('yes_ask', 0)
-        no_ask = odds.get('no_ask', 0)
-        
-        yes_mid_price = (yes_bid + yes_ask) / 2
-        no_mid_price = (no_bid + no_ask) / 2
-        
-        if action == "buy_yes":
-            # For YES bets, use the yes_mid_price as the market's implied probability
-            return yes_mid_price if yes_mid_price > 0 else None
-        elif action == "buy_no":
-            # For NO bets, use the no_mid_price as the market's implied probability
-            return no_mid_price if no_mid_price > 0 else None
-        
-        return None
+        return str(filepath)
+
     
     async def run(self):
         """Main bot execution."""
@@ -1536,6 +1236,16 @@ class SimpleTradingBot:
                 return
             
             analysis = await self.get_betting_decisions(event_markets, probability_extractions, market_odds)
+            
+            # Save betting decisions to CSV with research data
+            self.save_betting_decisions_to_csv(
+                analysis=analysis,
+                research_results=research_results,
+                probability_extractions=probability_extractions, 
+                market_odds=market_odds,
+                event_markets=event_markets
+            )
+            
             await self.place_bets(analysis, market_odds, probability_extractions)
             
             self.console.print("\n[bold green]Bot execution completed![/bold green]")
