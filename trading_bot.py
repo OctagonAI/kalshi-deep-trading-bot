@@ -1282,8 +1282,18 @@ class SimpleTradingBot:
             # Get market odds
             if decision.ticker in market_odds:
                 odds = market_odds[decision.ticker]
-                market_yes_price = odds.get('yes_mid_price')
-                market_no_price = odds.get('no_mid_price')
+                
+                # Calculate mid-prices from bid/ask spreads
+                yes_bid = odds.get('yes_bid', 0)
+                no_bid = odds.get('no_bid', 0)
+                yes_ask = odds.get('yes_ask', 0)
+                no_ask = odds.get('no_ask', 0)
+                
+                # Calculate mid-prices (same logic as used elsewhere in the bot)
+                if yes_bid > 0 and yes_ask > 0:
+                    market_yes_price = (yes_bid + yes_ask) / 2
+                if no_bid > 0 and no_ask > 0:
+                    market_no_price = (no_bid + no_ask) / 2
             
             # Calculate edge if we have the necessary data
             edge_percentage = None
