@@ -1498,38 +1498,44 @@ class SimpleTradingBot:
                 if no_bid > 0 and no_ask > 0:
                     market_no_price = (no_bid + no_ask) / 2
             
-            # Calculate edge if we have the necessary data
-            edge_percentage = None
-            if research_probability is not None:
-                if decision.action == "buy_yes" and market_yes_price is not None:
-                    edge_percentage = research_probability - market_yes_price
-                elif decision.action == "buy_no" and market_no_price is not None:
-                    # For NO bets, edge is (100 - research_probability) - market_no_price
-                    edge_percentage = (100 - research_probability) - market_no_price
+            # Legacy edge calculation removed - now using R-score instead
             
             csv_row = {
+                # Basic info
                 'timestamp': datetime.now().isoformat(),
                 'event_ticker': event_ticker or '',
                 'event_title': event_title,
                 'market_ticker': decision.ticker,
                 'market_title': market_title,
+                
+                # Decision details
                 'action': decision.action,
                 'bet_amount': decision.amount,
                 'confidence': decision.confidence,
                 'reasoning': decision.reasoning,
+                
+                # Research data (original scale 0-100%)
                 'research_probability': research_probability,
                 'research_reasoning': research_reasoning,
+                
+                # Market data (original scale 0-100 cents)
                 'market_yes_price': market_yes_price,
                 'market_no_price': market_no_price,
-                'edge_percentage': edge_percentage,
+                
                 # Risk-adjusted metrics (hedge-fund style)
                 'expected_return': decision.expected_return,
                 'r_score': decision.r_score,
                 'kelly_fraction': decision.kelly_fraction,
-                'market_price_used': decision.market_price,
-                'research_prob_used': decision.research_probability,
+                
+                # Normalized probabilities used in calculations (0-1 scale)
+                'calc_market_prob': decision.market_price,  # Market probability used in R-score calc
+                'calc_research_prob': decision.research_probability,  # Research probability used in R-score calc
+                
+                # Hedging info
                 'is_hedge': decision.is_hedge,
                 'hedge_for': decision.hedge_for or '',
+                
+                # Research context
                 'research_summary': research_summary,
                 'raw_research': raw_research.replace('\n', ' ').replace('\r', ' ') if raw_research else ''
             }
@@ -1538,11 +1544,22 @@ class SimpleTradingBot:
         # Write to CSV
         if csv_data:
             fieldnames = [
+                # Basic info
                 'timestamp', 'event_ticker', 'event_title', 'market_ticker', 'market_title',
-                'action', 'bet_amount', 'confidence', 'reasoning', 'research_probability',
-                'research_reasoning', 'market_yes_price', 'market_no_price', 'edge_percentage',
-                'expected_return', 'r_score', 'kelly_fraction', 'market_price_used', 'research_prob_used',
-                'is_hedge', 'hedge_for', 'research_summary', 'raw_research'
+                # Decision details  
+                'action', 'bet_amount', 'confidence', 'reasoning',
+                # Research data (original scale 0-100%)
+                'research_probability', 'research_reasoning',
+                # Market data (original scale 0-100 cents)
+                'market_yes_price', 'market_no_price',
+                # Risk-adjusted metrics (hedge-fund style)
+                'expected_return', 'r_score', 'kelly_fraction',
+                # Normalized probabilities used in calculations (0-1 scale)
+                'calc_market_prob', 'calc_research_prob',
+                # Hedging info
+                'is_hedge', 'hedge_for',
+                # Research context
+                'research_summary', 'raw_research'
             ]
             
             with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
