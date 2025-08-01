@@ -8,6 +8,7 @@ import csv
 import json
 import csv
 import datetime
+import math
 from pathlib import Path
 import sys
 from datetime import datetime
@@ -65,9 +66,159 @@ class SimpleTradingBot:
         self.console.print(f"[blue]Minimum time to event strike: {self.config.minimum_time_remaining_hours} hours (for events with strike_date)[/blue]")
         self.console.print(f"[blue]Max markets per event: {self.config.max_markets_per_event}[/blue]")
         self.console.print(f"[blue]Max bet amount: ${self.config.max_bet_amount}[/blue]")
-        self.console.print(f"[blue]Minimum alpha threshold: {self.config.minimum_alpha_threshold}x[/blue]")
         hedging_status = "Enabled" if self.config.enable_hedging else "Disabled"
-        self.console.print(f"[blue]Risk hedging: {hedging_status} (ratio: {self.config.hedge_ratio}, min confidence: {self.config.min_confidence_for_hedging})[/blue]\n")
+        self.console.print(f"[blue]Risk hedging: {hedging_status} (ratio: {self.config.hedge_ratio}, min confidence: {self.config.min_confidence_for_hedging})[/blue]")
+        
+        # Show risk-adjusted trading settings
+        self.console.print(f"[blue]R-score filtering: Enabled (z-threshold: {self.config.z_threshold})[/blue]")
+        if self.config.enable_kelly_sizing:
+            self.console.print(f"[blue]Kelly sizing: Enabled (fraction: {self.config.kelly_fraction}, bankroll: ${self.config.bankroll})[/blue]")
+        self.console.print(f"[blue]Portfolio selection: {self.config.portfolio_selection_method} (max positions: {self.config.max_portfolio_positions})[/blue]\n")
+    
+    def calculate_risk_adjusted_metrics(self, research_prob: float, market_price: float, action: str) -> dict:
+        """
+        Calculate hedge-fund style risk-adjusted metrics.
+        
+        Args:
+            research_prob: Research probability (0-1)
+            market_price: Market price (0-1) 
+            action: "buy_yes" or "buy_no"
+            
+        Returns:
+            dict with expected_return, r_score, kelly_fraction
+        """
+        try:
+            # Adjust probabilities based on action
+            if action == "buy_yes":
+                p = research_prob  # Our probability of YES
+                y = market_price   # Market price of YES
+            elif action == "buy_no":
+                p = 1 - research_prob  # Our probability of NO (1 - research_prob_of_yes)
+                y = market_price       # Market price of NO
+            else:
+                return {"expected_return": 0.0, "r_score": 0.0, "kelly_fraction": 0.0}
+            
+            # Prevent division by zero and invalid probabilities
+            if y <= 0 or y >= 1 or p <= 0 or p >= 1:
+                return {"expected_return": 0.0, "r_score": 0.0, "kelly_fraction": 0.0}
+            
+            # Expected return on capital: E[R] = (p-y)/y
+            expected_return = (p - y) / y
+            
+            # Risk-Adjusted Edge (R-score): (p-y)/sqrt(p*(1-p)) 
+            # This is the z-score - how many standard deviations away from fair value
+            variance = p * (1 - p)
+            if variance <= 0:
+                return {"expected_return": expected_return, "r_score": 0.0, "kelly_fraction": 0.0}
+            
+            r_score = (p - y) / math.sqrt(variance)
+            
+            # Kelly fraction: f_kelly = (p-y)/(1-y)
+            # This gives the optimal fraction of bankroll to bet
+            if y >= 1:
+                kelly_fraction = 0.0
+            else:
+                kelly_fraction = (p - y) / (1 - y)
+                # Ensure Kelly fraction is reasonable (between 0 and 1)
+                kelly_fraction = max(0.0, min(1.0, kelly_fraction))
+            
+            return {
+                "expected_return": expected_return,
+                "r_score": r_score, 
+                "kelly_fraction": kelly_fraction
+            }
+            
+        except Exception as e:
+            logger.warning(f"Error calculating risk metrics: {e}")
+            return {"expected_return": 0.0, "r_score": 0.0, "kelly_fraction": 0.0}
+    
+    def calculate_kelly_position_size(self, kelly_fraction: float) -> float:
+        """
+        Calculate position size using fractional Kelly criterion.
+        
+        Args:
+            kelly_fraction: Optimal Kelly fraction (0-1)
+            
+        Returns:
+            Position size in dollars
+        """
+        if not self.config.enable_kelly_sizing or kelly_fraction <= 0:
+            return self.config.max_bet_amount
+        
+        # Apply fractional Kelly (e.g., half-Kelly)
+        adjusted_kelly = kelly_fraction * self.config.kelly_fraction
+        
+        # Calculate position size as fraction of bankroll
+        kelly_bet_size = self.config.bankroll * adjusted_kelly
+        
+        # Apply maximum bet fraction constraint
+        max_allowed = self.config.bankroll * self.config.max_kelly_bet_fraction
+        kelly_bet_size = min(kelly_bet_size, max_allowed)
+        
+        # Apply absolute maximum bet limit
+        kelly_bet_size = min(kelly_bet_size, self.config.max_bet_amount)
+        
+        # Ensure minimum bet size
+        kelly_bet_size = max(kelly_bet_size, 1.0)
+        
+        return kelly_bet_size
+    
+    def apply_portfolio_selection(self, analysis: MarketAnalysis, event_ticker: str) -> MarketAnalysis:
+        """
+        Apply portfolio selection to hold only the N highest R-scores.
+        Step 4: Portfolio view - hold the N highest R-scores subject to limits.
+        """
+        if self.config.portfolio_selection_method == "legacy":
+            # Skip portfolio optimization, use existing logic
+            return analysis
+        
+        # Filter out skip decisions for ranking
+        actionable_decisions = [d for d in analysis.decisions if d.action != "skip"]
+        skip_decisions = [d for d in analysis.decisions if d.action == "skip"]
+        
+        if not actionable_decisions:
+            return analysis
+        
+        if self.config.portfolio_selection_method == "top_r_scores":
+            # Sort by R-score (highest first)
+            actionable_decisions.sort(key=lambda d: d.r_score or -999, reverse=True)
+            
+            # Select top N positions
+            max_positions = self.config.max_portfolio_positions
+            selected_decisions = actionable_decisions[:max_positions]
+            
+            # Convert remaining to skip decisions
+            rejected_decisions = []
+            for decision in actionable_decisions[max_positions:]:
+                skip_decision = BettingDecision(
+                    ticker=decision.ticker,
+                    action="skip",
+                    confidence=decision.confidence,
+                    amount=0.0,
+                    reasoning=f"Portfolio limit: R-score {decision.r_score:.2f} ranked #{len(selected_decisions)+1}",
+                    event_name=decision.event_name,
+                    market_name=decision.market_name,
+                    expected_return=decision.expected_return,
+                    r_score=decision.r_score,
+                    kelly_fraction=decision.kelly_fraction,
+                    market_price=decision.market_price,
+                    research_probability=decision.research_probability
+                )
+                rejected_decisions.append(skip_decision)
+            
+            if rejected_decisions:
+                logger.info(f"Portfolio selection: kept top {len(selected_decisions)} positions, "
+                           f"rejected {len(rejected_decisions)} lower R-score positions")
+            
+            # Combine selected decisions with all skip decisions
+            analysis.decisions = selected_decisions + skip_decisions + rejected_decisions
+            
+        elif self.config.portfolio_selection_method == "diversified":
+            # Future enhancement: could implement diversification by event category, etc.
+            # For now, fall back to top R-scores
+            return self.apply_portfolio_selection(analysis, event_ticker)
+        
+        return analysis
     
     async def get_top_events(self) -> List[Dict[str, Any]]:
         """Get top events sorted by 24-hour volume."""
@@ -803,9 +954,35 @@ class SimpleTradingBot:
                 yes_ask = odds.get('yes_ask', 0)
                 no_ask = odds.get('no_ask', 0)
                 
-                # Calculate mid-prices
-                yes_mid_price = (yes_bid + yes_ask) / 2
-                no_mid_price = (no_bid + no_ask) / 2
+                # Calculate mid-prices with validation
+                # Only calculate mid-price if both bid and ask are > 0
+                yes_mid_price = None
+                no_mid_price = None
+                
+                if yes_bid > 0 and yes_ask > 0:
+                    yes_mid_price = (yes_bid + yes_ask) / 2
+                elif yes_ask > 0:
+                    # If only ask is available, use ask price as approximation
+                    yes_mid_price = yes_ask
+                elif yes_bid > 0:
+                    # If only bid is available, use bid price as approximation
+                    yes_mid_price = yes_bid
+                
+                if no_bid > 0 and no_ask > 0:
+                    no_mid_price = (no_bid + no_ask) / 2
+                elif no_ask > 0:
+                    # If only ask is available, use ask price as approximation
+                    no_mid_price = no_ask
+                elif no_bid > 0:
+                    # If only bid is available, use bid price as approximation
+                    no_mid_price = no_bid
+                
+                # Log warning if we couldn't calculate proper mid-prices
+                if yes_mid_price is None or no_mid_price is None:
+                    logger.warning(f"Market {ticker}: Missing bid/ask data - yes_bid={yes_bid}, yes_ask={yes_ask}, no_bid={no_bid}, no_ask={no_ask}")
+                    # Fallback: use 0 for missing prices
+                    yes_mid_price = yes_mid_price or 0
+                    no_mid_price = no_mid_price or 0
                 
                 market_data.update({
                     'yes_bid': yes_bid,
@@ -917,24 +1094,24 @@ class SimpleTradingBot:
         - Minimum edge requirement: Research probability must differ by at least 5 percentage points from market odds
         - Focus on quality over quantity - better to make 1 great bet than 5 mediocre ones
         
-        MINIMUM ALPHA THRESHOLD REQUIREMENT:
-        - Only place bets when there's at least a {self.config.minimum_alpha_threshold}x difference between research and market price
-        - For YES bets: Research probability must be >= {self.config.minimum_alpha_threshold}x the market yes_mid_price
-        - For NO bets: Research probability must be <= market no_mid_price / {self.config.minimum_alpha_threshold}
-        - Example: If market yes_mid_price is 25% and minimum_alpha_threshold is 2.0x, research probability must be >= 50%
-        - Example: If market no_mid_price is 75% and minimum_alpha_threshold is 2.0x, research probability must be <= 37.5%
-        - SKIP all bets that don't meet this minimum alpha threshold
+        RISK-ADJUSTED FILTERING (HEDGE-FUND STYLE):
+        - Only place bets with strong statistical edge: R-score (z-score) >= {self.config.z_threshold}
+        - R-score measures how many standard deviations away the market is from fair value
+        - Higher R-scores indicate higher conviction opportunities with better risk-adjusted returns
+        - Example: R-score of 2.0 means the market is 2 standard deviations mis-priced (97.5th percentile opportunity)
+        - SKIP all bets with R-score below the threshold - focus on exceptional statistical opportunities
         
         POSITION SIZING STRATEGY:
-        - Primary bet: Largest position (${self.config.max_bet_amount}) on the single best opportunity
-        - Secondary bets: Much smaller positions (≤60% of primary) only for exceptional hedge opportunities
-        - Most markets: SKIP - don't bet unless there's a clear, substantial edge
+        - Use Kelly criterion for optimal position sizing based on edge and risk
+        - Higher R-score opportunities get larger position sizes (within risk limits)
+        - Maximum position size capped at ${self.config.max_bet_amount} and {self.config.max_kelly_bet_fraction*100}% of bankroll
+        - Most markets: SKIP - only bet on the highest R-score opportunities
         
-        EDGE CALCULATION:
-        - Compare research predicted probability to yes_mid_price and no_mid_price
-        - Look for market mispricing of 5+ percentage points
-        - Higher confidence required for smaller edges
-        - MANDATORY: Check minimum alpha threshold before considering any bet
+        RISK-ADJUSTED EDGE CALCULATION:
+        - Bot automatically calculates R-score (z-score) for statistical edge measurement
+        - R-score accounts for both probability difference AND volatility/risk
+        - Higher R-scores indicate better risk-adjusted opportunities
+        - Kelly sizing automatically optimizes position size based on edge and risk
         
         Return your analysis in the specified JSON format.
         """
@@ -960,6 +1137,9 @@ class SimpleTradingBot:
             
             # Apply strategic filtering to ensure selective betting
             analysis = self._apply_strategic_filtering(analysis, event_ticker)
+            
+            # Apply portfolio selection to hold only the N highest R-scores
+            analysis = self.apply_portfolio_selection(analysis, event_ticker)
             
             # Post-process for mutually exclusive events: ensure only one YES bet
             if is_mutually_exclusive:
@@ -1037,12 +1217,7 @@ class SimpleTradingBot:
         return analysis
     
     def _apply_alpha_threshold_validation(self, analysis: MarketAnalysis, event_ticker: str, markets: List[Dict[str, Any]], probability_extraction: ProbabilityExtraction, market_odds: Dict[str, Dict[str, Any]]) -> MarketAnalysis:
-        """Apply alpha threshold validation to ensure minimum edge requirements."""
-        if not hasattr(self.config, 'minimum_alpha_threshold'):
-            # If no alpha threshold configured, return as-is
-            return analysis
-        
-        min_alpha = getattr(self.config, 'minimum_alpha_threshold', 2.0)
+        """Apply risk-adjusted threshold validation and enrich decisions with metrics."""
         validated_decisions = []
         
         for decision in analysis.decisions:
@@ -1064,7 +1239,7 @@ class SimpleTradingBot:
                     action="skip",
                     confidence=decision.confidence,
                     amount=0.0,
-                    reasoning=f"Skipped due to missing probability data for alpha calculation",
+                    reasoning=f"Skipped due to missing probability data",
                     event_name=decision.event_name,
                     market_name=decision.market_name
                 )
@@ -1087,38 +1262,63 @@ class SimpleTradingBot:
                     action="skip",
                     confidence=decision.confidence,
                     amount=0.0,
-                    reasoning=f"Skipped due to missing market odds for alpha calculation",
+                    reasoning=f"Skipped due to missing market odds",
                     event_name=decision.event_name,
                     market_name=decision.market_name
                 )
                 validated_decisions.append(skip_decision)
                 continue
             
-            # Calculate alpha (edge)
-            research_prob = market_prob / 100.0  # Convert to probability
-            if decision.action == "buy_yes":
-                alpha = research_prob / market_odds_data
-            elif decision.action == "buy_no":
-                alpha = (1 - research_prob) / market_odds_data
-            else:
-                alpha = 1.0  # Default for other actions
+            # Convert probabilities to 0-1 range
+            research_prob = market_prob / 100.0
             
-            # Check if alpha meets minimum threshold
-            if alpha >= min_alpha:
+            # Calculate risk-adjusted metrics
+            risk_metrics = self.calculate_risk_adjusted_metrics(
+                research_prob, market_odds_data, decision.action
+            )
+            
+            # Apply threshold filtering - use R-score filtering by default
+            should_accept = False
+            rejection_reason = ""
+            
+            # Use R-score (z-score) filtering - the new standard
+            if risk_metrics["r_score"] >= self.config.z_threshold:
+                should_accept = True
+            else:
+                rejection_reason = f"R-score {risk_metrics['r_score']:.2f} below z-threshold {self.config.z_threshold:.2f}"
+            
+            if should_accept:
+                # Calculate Kelly position size if enabled
+                if self.config.enable_kelly_sizing:
+                    kelly_size = self.calculate_kelly_position_size(risk_metrics["kelly_fraction"])
+                    decision.amount = kelly_size
+                
+                # Enrich decision with risk metrics
+                decision.expected_return = risk_metrics["expected_return"]
+                decision.r_score = risk_metrics["r_score"]
+                decision.kelly_fraction = risk_metrics["kelly_fraction"]
+                decision.market_price = market_odds_data
+                decision.research_probability = research_prob
+                
                 validated_decisions.append(decision)
             else:
-                # Convert to skip if alpha too low
+                # Convert to skip if threshold not met
                 skip_decision = BettingDecision(
                     ticker=decision.ticker,
                     action="skip",
                     confidence=decision.confidence,
                     amount=0.0,
-                    reasoning=f"Skipped due to insufficient alpha: {alpha:.2f} < {min_alpha:.2f}",
+                    reasoning=f"Skipped: {rejection_reason}",
                     event_name=decision.event_name,
-                    market_name=decision.market_name
+                    market_name=decision.market_name,
+                    expected_return=risk_metrics["expected_return"],
+                    r_score=risk_metrics["r_score"],
+                    kelly_fraction=risk_metrics["kelly_fraction"],
+                    market_price=market_odds_data,
+                    research_probability=research_prob
                 )
                 validated_decisions.append(skip_decision)
-                logger.info(f"Filtered out {decision.ticker} - Alpha {alpha:.2f} below threshold {min_alpha:.2f}")
+                logger.info(f"Filtered out {decision.ticker} - {rejection_reason}")
         
         # Update analysis with validated decisions
         analysis.decisions = validated_decisions
@@ -1322,6 +1522,12 @@ class SimpleTradingBot:
                 'market_yes_price': market_yes_price,
                 'market_no_price': market_no_price,
                 'edge_percentage': edge_percentage,
+                # Risk-adjusted metrics (hedge-fund style)
+                'expected_return': decision.expected_return,
+                'r_score': decision.r_score,
+                'kelly_fraction': decision.kelly_fraction,
+                'market_price_used': decision.market_price,
+                'research_prob_used': decision.research_probability,
                 'is_hedge': decision.is_hedge,
                 'hedge_for': decision.hedge_for or '',
                 'research_summary': research_summary,
@@ -1335,6 +1541,7 @@ class SimpleTradingBot:
                 'timestamp', 'event_ticker', 'event_title', 'market_ticker', 'market_title',
                 'action', 'bet_amount', 'confidence', 'reasoning', 'research_probability',
                 'research_reasoning', 'market_yes_price', 'market_no_price', 'edge_percentage',
+                'expected_return', 'r_score', 'kelly_fraction', 'market_price_used', 'research_prob_used',
                 'is_hedge', 'hedge_for', 'research_summary', 'raw_research'
             ]
             
@@ -1462,7 +1669,9 @@ Configuration:
     MAX_BET_AMOUNT=25.0                # Max bet per market (default: 25.0)
     RESEARCH_BATCH_SIZE=10             # Parallel research requests (default: 10)
     SKIP_EXISTING_POSITIONS=true       # Skip markets with existing positions (default: true)
-    MINIMUM_ALPHA_THRESHOLD=2.0        # Minimum alpha threshold for betting (default: 2.0)
+    Z_THRESHOLD=1.5                    # Minimum R-score (z-score) for betting (default: 1.5)
+    KELLY_FRACTION=0.5                 # Fraction of Kelly to use for position sizing (default: 0.5)
+    BANKROLL=1000.0                    # Total bankroll for Kelly calculations (default: 1000.0)
     
   Trading modes:
     Default: Dry run mode - shows what trades would be made without placing real bets
