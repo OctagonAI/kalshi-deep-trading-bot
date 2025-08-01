@@ -956,9 +956,35 @@ class SimpleTradingBot:
                 yes_ask = odds.get('yes_ask', 0)
                 no_ask = odds.get('no_ask', 0)
                 
-                # Calculate mid-prices
-                yes_mid_price = (yes_bid + yes_ask) / 2
-                no_mid_price = (no_bid + no_ask) / 2
+                # Calculate mid-prices with validation
+                # Only calculate mid-price if both bid and ask are > 0
+                yes_mid_price = None
+                no_mid_price = None
+                
+                if yes_bid > 0 and yes_ask > 0:
+                    yes_mid_price = (yes_bid + yes_ask) / 2
+                elif yes_ask > 0:
+                    # If only ask is available, use ask price as approximation
+                    yes_mid_price = yes_ask
+                elif yes_bid > 0:
+                    # If only bid is available, use bid price as approximation
+                    yes_mid_price = yes_bid
+                
+                if no_bid > 0 and no_ask > 0:
+                    no_mid_price = (no_bid + no_ask) / 2
+                elif no_ask > 0:
+                    # If only ask is available, use ask price as approximation
+                    no_mid_price = no_ask
+                elif no_bid > 0:
+                    # If only bid is available, use bid price as approximation
+                    no_mid_price = no_bid
+                
+                # Log warning if we couldn't calculate proper mid-prices
+                if yes_mid_price is None or no_mid_price is None:
+                    logger.warning(f"Market {ticker}: Missing bid/ask data - yes_bid={yes_bid}, yes_ask={yes_ask}, no_bid={no_bid}, no_ask={no_ask}")
+                    # Fallback: use 0 for missing prices
+                    yes_mid_price = yes_mid_price or 0
+                    no_mid_price = no_mid_price or 0
                 
                 market_data.update({
                     'yes_bid': yes_bid,
