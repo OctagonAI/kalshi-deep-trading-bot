@@ -36,6 +36,13 @@ class BettingDecision(BaseModel):
     is_hedge: bool = Field(False, description="Whether this is a hedge bet")
     hedge_for: Optional[str] = Field(None, description="Ticker of the main bet this hedges")
     hedge_ratio: Optional[float] = Field(None, ge=0, le=1, description="Proportion of main bet this hedges")
+    
+    # Risk-adjusted metrics (hedge-fund style)
+    expected_return: Optional[float] = Field(None, description="Expected return on capital E[R] = (p-y)/y")
+    r_score: Optional[float] = Field(None, description="Risk-adjusted edge: (p-y)/sqrt(p*(1-p)) - the z-score")
+    kelly_fraction: Optional[float] = Field(None, description="Optimal Kelly fraction for position sizing")
+    market_price: Optional[float] = Field(None, description="Market price used for calculations (0-1)")
+    research_probability: Optional[float] = Field(None, description="Research probability used for calculations (0-1)")
 
 
 class MarketAnalysis(BaseModel):
