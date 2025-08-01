@@ -66,13 +66,11 @@ class SimpleTradingBot:
         self.console.print(f"[blue]Minimum time to event strike: {self.config.minimum_time_remaining_hours} hours (for events with strike_date)[/blue]")
         self.console.print(f"[blue]Max markets per event: {self.config.max_markets_per_event}[/blue]")
         self.console.print(f"[blue]Max bet amount: ${self.config.max_bet_amount}[/blue]")
-        self.console.print(f"[blue]Minimum alpha threshold: {self.config.minimum_alpha_threshold}x[/blue]")
         hedging_status = "Enabled" if self.config.enable_hedging else "Disabled"
         self.console.print(f"[blue]Risk hedging: {hedging_status} (ratio: {self.config.hedge_ratio}, min confidence: {self.config.min_confidence_for_hedging})[/blue]")
         
         # Show risk-adjusted trading settings
-        if self.config.enable_r_score_filtering:
-            self.console.print(f"[blue]R-score filtering: Enabled (z-threshold: {self.config.z_threshold})[/blue]")
+        self.console.print(f"[blue]R-score filtering: Enabled (z-threshold: {self.config.z_threshold})[/blue]")
         if self.config.enable_kelly_sizing:
             self.console.print(f"[blue]Kelly sizing: Enabled (fraction: {self.config.kelly_fraction}, bankroll: ${self.config.bankroll})[/blue]")
         self.console.print(f"[blue]Portfolio selection: {self.config.portfolio_selection_method} (max positions: {self.config.max_portfolio_positions})[/blue]\n")
@@ -1096,24 +1094,24 @@ class SimpleTradingBot:
         - Minimum edge requirement: Research probability must differ by at least 5 percentage points from market odds
         - Focus on quality over quantity - better to make 1 great bet than 5 mediocre ones
         
-        MINIMUM ALPHA THRESHOLD REQUIREMENT:
-        - Only place bets when there's at least a {self.config.minimum_alpha_threshold}x difference between research and market price
-        - For YES bets: Research probability must be >= {self.config.minimum_alpha_threshold}x the market yes_mid_price
-        - For NO bets: Research probability must be <= market no_mid_price / {self.config.minimum_alpha_threshold}
-        - Example: If market yes_mid_price is 25% and minimum_alpha_threshold is 2.0x, research probability must be >= 50%
-        - Example: If market no_mid_price is 75% and minimum_alpha_threshold is 2.0x, research probability must be <= 37.5%
-        - SKIP all bets that don't meet this minimum alpha threshold
+        RISK-ADJUSTED FILTERING (HEDGE-FUND STYLE):
+        - Only place bets with strong statistical edge: R-score (z-score) >= {self.config.z_threshold}
+        - R-score measures how many standard deviations away the market is from fair value
+        - Higher R-scores indicate higher conviction opportunities with better risk-adjusted returns
+        - Example: R-score of 2.0 means the market is 2 standard deviations mis-priced (97.5th percentile opportunity)
+        - SKIP all bets with R-score below the threshold - focus on exceptional statistical opportunities
         
         POSITION SIZING STRATEGY:
-        - Primary bet: Largest position (${self.config.max_bet_amount}) on the single best opportunity
-        - Secondary bets: Much smaller positions (≤60% of primary) only for exceptional hedge opportunities
-        - Most markets: SKIP - don't bet unless there's a clear, substantial edge
+        - Use Kelly criterion for optimal position sizing based on edge and risk
+        - Higher R-score opportunities get larger position sizes (within risk limits)
+        - Maximum position size capped at ${self.config.max_bet_amount} and {self.config.max_kelly_bet_fraction*100}% of bankroll
+        - Most markets: SKIP - only bet on the highest R-score opportunities
         
-        EDGE CALCULATION:
-        - Compare research predicted probability to yes_mid_price and no_mid_price
-        - Look for market mispricing of 5+ percentage points
-        - Higher confidence required for smaller edges
-        - MANDATORY: Check minimum alpha threshold before considering any bet
+        RISK-ADJUSTED EDGE CALCULATION:
+        - Bot automatically calculates R-score (z-score) for statistical edge measurement
+        - R-score accounts for both probability difference AND volatility/risk
+        - Higher R-scores indicate better risk-adjusted opportunities
+        - Kelly sizing automatically optimizes position size based on edge and risk
         
         Return your analysis in the specified JSON format.
         """
@@ -1279,30 +1277,15 @@ class SimpleTradingBot:
                 research_prob, market_odds_data, decision.action
             )
             
-            # Apply threshold filtering
+            # Apply threshold filtering - use R-score filtering by default
             should_accept = False
             rejection_reason = ""
             
-            if self.config.enable_r_score_filtering:
-                # Use R-score (z-score) filtering
-                if risk_metrics["r_score"] >= self.config.z_threshold:
-                    should_accept = True
-                else:
-                    rejection_reason = f"R-score {risk_metrics['r_score']:.2f} below z-threshold {self.config.z_threshold:.2f}"
+            # Use R-score (z-score) filtering - the new standard
+            if risk_metrics["r_score"] >= self.config.z_threshold:
+                should_accept = True
             else:
-                # Use legacy alpha filtering
-                min_alpha = getattr(self.config, 'minimum_alpha_threshold', 2.0)
-                if decision.action == "buy_yes":
-                    alpha = research_prob / market_odds_data
-                elif decision.action == "buy_no":
-                    alpha = (1 - research_prob) / market_odds_data
-                else:
-                    alpha = 1.0
-                
-                if alpha >= min_alpha:
-                    should_accept = True
-                else:
-                    rejection_reason = f"Alpha {alpha:.2f} below threshold {min_alpha:.2f}"
+                rejection_reason = f"R-score {risk_metrics['r_score']:.2f} below z-threshold {self.config.z_threshold:.2f}"
             
             if should_accept:
                 # Calculate Kelly position size if enabled
@@ -1686,7 +1669,9 @@ Configuration:
     MAX_BET_AMOUNT=25.0                # Max bet per market (default: 25.0)
     RESEARCH_BATCH_SIZE=10             # Parallel research requests (default: 10)
     SKIP_EXISTING_POSITIONS=true       # Skip markets with existing positions (default: true)
-    MINIMUM_ALPHA_THRESHOLD=2.0        # Minimum alpha threshold for betting (default: 2.0)
+    Z_THRESHOLD=1.5                    # Minimum R-score (z-score) for betting (default: 1.5)
+    KELLY_FRACTION=0.5                 # Fraction of Kelly to use for position sizing (default: 0.5)
+    BANKROLL=1000.0                    # Total bankroll for Kelly calculations (default: 1000.0)
     
   Trading modes:
     Default: Dry run mode - shows what trades would be made without placing real bets

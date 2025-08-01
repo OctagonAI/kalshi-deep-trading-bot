@@ -91,11 +91,12 @@ class BotConfig(BaseSettings):
     skip_existing_positions: bool = Field(default=True, description="Skip betting on markets where we already have positions")
     minimum_time_remaining_hours: float = Field(default=1.0, description="Minimum hours remaining before event strike to consider it tradeable (only applied to events with strike_date)")
     max_markets_per_event: int = Field(default=10, description="Maximum number of markets per event to analyze (selects top N markets by volume)")
-    minimum_alpha_threshold: float = Field(default=2.0, description="Minimum alpha threshold for betting (research_price / market_price must be >= this value)")
+    # Legacy alpha threshold (deprecated - use R-score filtering instead)
+    minimum_alpha_threshold: float = Field(default=2.0, description="DEPRECATED: Use z_threshold and enable_r_score_filtering instead")
     
-    # Risk-adjusted trading parameters
+    # Risk-adjusted trading parameters (now the default system)
     z_threshold: float = Field(default=1.5, description="Minimum R-score (z-score) threshold for placing bets")
-    enable_r_score_filtering: bool = Field(default=True, description="Use R-score instead of simple edge for filtering")
+    enable_r_score_filtering: bool = Field(default=True, description="DEPRECATED: R-score filtering is now always enabled")
     
     # Kelly criterion and position sizing
     enable_kelly_sizing: bool = Field(default=True, description="Use Kelly criterion for position sizing")
