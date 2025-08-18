@@ -18,6 +18,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from loguru import logger
+import re
 
 from kalshi_client import KalshiClient
 from research_client import OctagonClient
@@ -997,6 +998,17 @@ class SimpleTradingBot:
             
             markets_with_odds.append(market_data)
         
+        # Skip one-sided markets where either YES or NO mid price is missing/zero
+        filtered_markets_with_odds = []
+        for md in markets_with_odds:
+            yes_mid = md.get('yes_mid_price')
+            no_mid = md.get('no_mid_price')
+            if yes_mid in (None, 0) or no_mid in (None, 0):
+                logger.info(f"Skipping market {md.get('ticker', '')}: missing yes/no price (yes_mid={yes_mid}, no_mid={no_mid})")
+                continue
+            filtered_markets_with_odds.append(md)
+        markets_with_odds = filtered_markets_with_odds
+
         # Create single event data with structured probabilities
         is_mutually_exclusive = event_info.get('mutually_exclusive', False)
         single_event_data = {
