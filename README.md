@@ -62,7 +62,7 @@ cp env_template.txt .env
 ```
 
 Required API keys:
-- **Kalshi API**: Get from [kalshi.com](https://kalshi.com/profile/api) or [demo.kalshi.co](https://demo.kalshi.co)
+- **Kalshi API**: Get from [kalshi.com](https://docs.kalshi.com/getting_started/api_keys) or [demo.kalshi.co](https://demo.kalshi.co)
 - **Octagon API**: Get from [app.octagonai.co](https://app.octagonai.co/signup)
 - **OpenAI API**: Get from [platform.openai.com](https://platform.openai.com/api-keys)
 
