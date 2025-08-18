@@ -1510,6 +1510,11 @@ class SimpleTradingBot:
                 if no_bid > 0 and no_ask > 0:
                     market_no_price = (no_bid + no_ask) / 2
             
+            # Skip one-sided markets in CSV output
+            if (market_yes_price is None or market_yes_price == 0) or (market_no_price is None or market_no_price == 0):
+                # No valid market on one side; exclude from CSV
+                continue
+            
             # Legacy edge calculation removed - now using R-score instead
             
             csv_row = {
