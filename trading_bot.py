@@ -1504,11 +1504,23 @@ class SimpleTradingBot:
                 yes_ask = odds.get('yes_ask', 0)
                 no_ask = odds.get('no_ask', 0)
                 
+                # If either side has no liquidity (both bid and ask are 0), skip this market in CSV
+                has_yes_side = (yes_bid > 0) or (yes_ask > 0)
+                has_no_side = (no_bid > 0) or (no_ask > 0)
+                if not (has_yes_side and has_no_side):
+                    # One-sided or illiquid market — exclude from CSV
+                    continue
+
                 # Calculate mid-prices (same logic as used elsewhere in the bot)
                 if yes_bid > 0 and yes_ask > 0:
                     market_yes_price = (yes_bid + yes_ask) / 2
                 if no_bid > 0 and no_ask > 0:
                     market_no_price = (no_bid + no_ask) / 2
+            
+            # Skip one-sided markets in CSV output
+            if (market_yes_price is None or market_yes_price == 0) or (market_no_price is None or market_no_price == 0):
+                # No valid market on one side; exclude from CSV
+                continue
             
             # Legacy edge calculation removed - now using R-score instead
             
