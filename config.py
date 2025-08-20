@@ -88,6 +88,7 @@ class BotConfig(BaseSettings):
     max_bet_amount: float = Field(default=100.0, description="Maximum bet amount per market")
     max_events_to_analyze: int = Field(default=50, description="Number of top events to analyze by volume_24h")
     research_batch_size: int = Field(default=10, description="Number of parallel deep research requests to batch")
+    research_timeout_seconds: int = Field(default=900, description="Per-event research timeout in seconds")
     skip_existing_positions: bool = Field(default=True, description="Skip betting on markets where we already have positions")
     minimum_time_remaining_hours: float = Field(default=1.0, description="Minimum hours remaining before event strike to consider it tradeable (only applied to events with strike_date)")
     max_markets_per_event: int = Field(default=10, description="Maximum number of markets per event to analyze (selects top N markets by volume)")
@@ -148,6 +149,7 @@ class BotConfig(BaseSettings):
             "max_bet_amount": float(_clean_env_value(os.getenv("MAX_BET_AMOUNT", "100.0"))),
             "max_events_to_analyze": int(_clean_env_value(os.getenv("MAX_EVENTS_TO_ANALYZE", "50"))),
             "research_batch_size": int(_clean_env_value(os.getenv("RESEARCH_BATCH_SIZE", "10"))),
+            "research_timeout_seconds": int(_clean_env_value(os.getenv("RESEARCH_TIMEOUT_SECONDS", "900"))),
             "skip_existing_positions": _clean_env_value(os.getenv("SKIP_EXISTING_POSITIONS", "true")).lower() == "true",
             "minimum_time_remaining_hours": float(_clean_env_value(os.getenv("MINIMUM_TIME_REMAINING_HOURS", "1.0"))),
             "max_markets_per_event": int(_clean_env_value(os.getenv("MAX_MARKETS_PER_EVENT", "10"))),

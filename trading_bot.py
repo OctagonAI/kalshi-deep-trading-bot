@@ -490,31 +490,38 @@ class SimpleTradingBot:
             
             for i in range(0, len(event_items), batch_size):
                 batch = event_items[i:i + batch_size]
+                self.console.print(f"[blue]Processing research batch {i//batch_size + 1} with {len(batch)} events[/blue]")
                 
-                # Research batch in parallel
+                # Research batch in parallel with per-event timeout
                 tasks = []
                 for event_ticker, data in batch:
                     event = data['event']
                     markets = data['markets']
                     if event and markets:
-                        tasks.append(self.research_client.research_event(event, markets))
+                        coro = self.research_client.research_event(event, markets)
+                        # Apply per-event timeout to avoid hanging the whole batch
+                        tasks.append(asyncio.wait_for(coro, timeout=self.config.research_timeout_seconds))
+                    else:
+                        tasks.append(asyncio.sleep(0, result=None))
                 
                 try:
                     results = await asyncio.gather(*tasks, return_exceptions=True)
                     
                     for (event_ticker, data), result in zip(batch, results):
-                        if not isinstance(result, Exception):
+                        if not isinstance(result, Exception) and result:
                             research_results[event_ticker] = result
                             progress.update(task, advance=1)
                             self.console.print(f"[green]✓ Researched {event_ticker}[/green]")
-                            
-                            
                         else:
-                            self.console.print(f"[red]✗ Failed to research {event_ticker}: {result}[/red]")
+                            err = result
+                            if isinstance(result, asyncio.TimeoutError):
+                                err = f"Timeout after {self.config.research_timeout_seconds}s"
+                            self.console.print(f"[red]✗ Failed to research {event_ticker}: {err}[/red]")
                             progress.update(task, advance=1)
                 
                 except Exception as e:
                     self.console.print(f"[red]Batch research error: {e}[/red]")
+                    # Ensure progress advances for this entire batch even on error
                     progress.update(task, advance=len(batch))
                 
                 # Brief pause between batches
