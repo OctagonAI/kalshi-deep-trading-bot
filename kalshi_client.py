@@ -19,13 +19,14 @@ from config import KalshiConfig
 class KalshiClient:
     """Simple Kalshi API client for basic trading operations."""
     
-    def __init__(self, config: KalshiConfig, minimum_time_remaining_hours: float = 1.0, max_markets_per_event: int = 10):
+    def __init__(self, config: KalshiConfig, minimum_time_remaining_hours: float = 1.0, max_markets_per_event: int = 10, max_close_ts: Optional[int] = None):
         self.config = config
         self.base_url = config.base_url
         self.api_key = config.api_key
         self.private_key = config.private_key
         self.minimum_time_remaining_hours = minimum_time_remaining_hours
         self.max_markets_per_event = max_markets_per_event
+        self.max_close_ts = max_close_ts
         self.client = None
         self.session_token = None
         
@@ -51,11 +52,48 @@ class KalshiClient:
             enriched_events = []
             now = datetime.now(timezone.utc)
             minimum_time_remaining = self.minimum_time_remaining_hours * 3600  # Convert hours to seconds
+            filter_enabled = self.max_close_ts is not None
+            markets_seen = 0
+            markets_kept = 0
+            events_dropped_by_expiration = 0
             
             for event in all_events:
                 # Get markets and select top N by volume
                 all_markets = event.get("markets", [])
+                markets_seen += len(all_markets)
+
+                # Optionally filter markets by close time if max_close_ts is provided
+                if self.max_close_ts is not None and all_markets:
+                    filtered_markets = []
+                    for market in all_markets:
+                        close_time_str = market.get("close_time", "")
+                        if not close_time_str:
+                            continue
+                        try:
+                            # Parse ISO8601 close_time
+                            if close_time_str.endswith('Z'):
+                                close_dt = datetime.fromisoformat(close_time_str.replace('Z', '+00:00'))
+                            else:
+                                close_dt = datetime.fromisoformat(close_time_str)
+                            if close_dt.tzinfo is None:
+                                close_dt = close_dt.replace(tzinfo=timezone.utc)
+                            close_ts = int(close_dt.timestamp())
+                            if close_ts <= self.max_close_ts:
+                                filtered_markets.append(market)
+                        except Exception:
+                            # If parsing fails, skip this market from filtered list
+                            continue
+                    all_markets = filtered_markets
                 
+                # If no markets remain after filtering, skip this event
+                if not all_markets:
+                    if filter_enabled:
+                        events_dropped_by_expiration += 1
+                    continue
+
+                if filter_enabled:
+                    markets_kept += len(all_markets)
+
                 # Sort markets by volume (descending) and take top N
                 sorted_markets = sorted(all_markets, key=lambda m: m.get("volume", 0), reverse=True)
                 top_markets = sorted_markets[:self.max_markets_per_event]
@@ -104,6 +142,10 @@ class KalshiClient:
                         logger.warning(f"Could not parse strike_date '{strike_date_str}' for event {event.get('event_ticker', '')}: {e}")
                         # Continue without time filtering for this event
                 
+                # If no top markets selected, skip event
+                if not top_markets:
+                    continue
+
                 enriched_events.append({
                     "event_ticker": event.get("event_ticker", ""),
                     "title": event.get("title", ""),
@@ -126,6 +168,14 @@ class KalshiClient:
             
             # Return only the top N events as requested
             top_events = enriched_events[:limit]
+            
+            # Summary log for expiration filter effects
+            if filter_enabled and markets_seen > 0:
+                dropped = markets_seen - markets_kept
+                logger.info(
+                    f"Expiration filter summary: kept {markets_kept}/{markets_seen} markets; "
+                    f"dropped {dropped}. Events dropped due to no remaining markets: {events_dropped_by_expiration}"
+                )
             
             logger.info(f"Retrieved {len(all_events)} total events, filtered to {len(enriched_events)} active events, returning top {len(top_events)} by 24h volume")
             return top_events
@@ -196,15 +246,40 @@ class KalshiClient:
         # Fallback: fetch markets directly if needed
         try:
             headers = await self._get_headers("GET", "/trade-api/v2/markets")
+            params = {"event_ticker": event_ticker, "status": "open"}
+            # Pass through server-side filter if available
+            if self.max_close_ts is not None:
+                params["max_close_ts"] = self.max_close_ts
             response = await self.client.get(
                 "/trade-api/v2/markets",
                 headers=headers,
-                params={"event_ticker": event_ticker, "status": "open"}
+                params=params
             )
             response.raise_for_status()
             
             data = response.json()
             all_markets = data.get("markets", [])
+
+            # Client-side filtering as a fallback when server-side filtering is not applied
+            if self.max_close_ts is not None and all_markets:
+                filtered_markets = []
+                for market in all_markets:
+                    close_time_str = market.get("close_time", "")
+                    if not close_time_str:
+                        continue
+                    try:
+                        if close_time_str.endswith('Z'):
+                            close_dt = datetime.fromisoformat(close_time_str.replace('Z', '+00:00'))
+                        else:
+                            close_dt = datetime.fromisoformat(close_time_str)
+                        if close_dt.tzinfo is None:
+                            close_dt = close_dt.replace(tzinfo=timezone.utc)
+                        close_ts = int(close_dt.timestamp())
+                        if close_ts <= self.max_close_ts:
+                            filtered_markets.append(market)
+                    except Exception:
+                        continue
+                all_markets = filtered_markets
             
             # Sort by volume and take top markets
             sorted_markets = sorted(all_markets, key=lambda m: m.get("volume", 0), reverse=True)

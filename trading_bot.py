@@ -14,6 +14,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+import time
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -30,7 +31,7 @@ import openai
 class SimpleTradingBot:
     """Simple trading bot that follows a clear workflow."""
     
-    def __init__(self, live_trading: bool = False):
+    def __init__(self, live_trading: bool = False, max_close_ts: Optional[int] = None):
         self.config = load_config()
         # Override dry_run based on CLI parameter
         self.config.dry_run = not live_trading
@@ -38,13 +39,19 @@ class SimpleTradingBot:
         self.kalshi_client = None
         self.research_client = None
         self.openai_client = None
+        self.max_close_ts = max_close_ts
         
     async def initialize(self):
         """Initialize all API clients."""
         self.console.print("[bold blue]Initializing trading bot...[/bold blue]")
         
         # Initialize clients
-        self.kalshi_client = KalshiClient(self.config.kalshi, self.config.minimum_time_remaining_hours, self.config.max_markets_per_event)
+        self.kalshi_client = KalshiClient(
+            self.config.kalshi,
+            self.config.minimum_time_remaining_hours,
+            self.config.max_markets_per_event,
+            max_close_ts=self.max_close_ts,
+        )
         self.research_client = OctagonClient(self.config.octagon)
         self.openai_client = openai.AsyncOpenAI(api_key=self.config.openai.api_key)
         
@@ -75,6 +82,9 @@ class SimpleTradingBot:
         if self.config.enable_kelly_sizing:
             self.console.print(f"[blue]Kelly sizing: Enabled (fraction: {self.config.kelly_fraction}, bankroll: ${self.config.bankroll})[/blue]")
         self.console.print(f"[blue]Portfolio selection: {self.config.portfolio_selection_method} (max positions: {self.config.max_portfolio_positions})[/blue]\n")
+        if self.max_close_ts is not None:
+            minutes_from_now = int((self.max_close_ts - int(time.time())) / 60)
+            self.console.print(f"[blue]Market expiration filter: close before ~{minutes_from_now} minutes from now[/blue]")
     
     def calculate_risk_adjusted_metrics(self, research_prob: float, market_price: float, action: str) -> dict:
         """
@@ -1687,9 +1697,9 @@ class SimpleTradingBot:
                 await self.kalshi_client.close()
 
 
-async def main(live_trading: bool = False):
+async def main(live_trading: bool = False, max_close_ts: Optional[int] = None):
     """Main entry point."""
-    bot = SimpleTradingBot(live_trading=live_trading)
+    bot = SimpleTradingBot(live_trading=live_trading, max_close_ts=max_close_ts)
     await bot.run()
 
 
@@ -1732,6 +1742,13 @@ Configuration:
         action='store_true',
         help='Enable live trading (default: dry run mode)'
     )
+    parser.add_argument(
+        '--max-expiration-minutes',
+        type=int,
+        default=None,
+        dest='max_expiration_minutes',
+        help='Only include markets that close within this many minutes from now.'
+    )
     
     parser.add_argument(
         '--version',
@@ -1744,7 +1761,10 @@ Configuration:
     
     # Try to load config and run bot
     try:
-        asyncio.run(main(live_trading=args.live))
+        max_close_ts = None
+        if args.max_expiration_minutes is not None and args.max_expiration_minutes > 0:
+            max_close_ts = int(time.time()) + (args.max_expiration_minutes * 60)
+        asyncio.run(main(live_trading=args.live, max_close_ts=max_close_ts))
     except Exception as e:
         console = Console()
         console.print(f"[red]Error: {e}[/red]")
