@@ -52,10 +52,15 @@ class KalshiClient:
             enriched_events = []
             now = datetime.now(timezone.utc)
             minimum_time_remaining = self.minimum_time_remaining_hours * 3600  # Convert hours to seconds
+            filter_enabled = self.max_close_ts is not None
+            markets_seen = 0
+            markets_kept = 0
+            events_dropped_by_expiration = 0
             
             for event in all_events:
                 # Get markets and select top N by volume
                 all_markets = event.get("markets", [])
+                markets_seen += len(all_markets)
 
                 # Optionally filter markets by close time if max_close_ts is provided
                 if self.max_close_ts is not None and all_markets:
@@ -82,7 +87,12 @@ class KalshiClient:
                 
                 # If no markets remain after filtering, skip this event
                 if not all_markets:
+                    if filter_enabled:
+                        events_dropped_by_expiration += 1
                     continue
+
+                if filter_enabled:
+                    markets_kept += len(all_markets)
 
                 # Sort markets by volume (descending) and take top N
                 sorted_markets = sorted(all_markets, key=lambda m: m.get("volume", 0), reverse=True)
@@ -158,6 +168,14 @@ class KalshiClient:
             
             # Return only the top N events as requested
             top_events = enriched_events[:limit]
+            
+            # Summary log for expiration filter effects
+            if filter_enabled and markets_seen > 0:
+                dropped = markets_seen - markets_kept
+                logger.info(
+                    f"Expiration filter summary: kept {markets_kept}/{markets_seen} markets; "
+                    f"dropped {dropped}. Events dropped due to no remaining markets: {events_dropped_by_expiration}"
+                )
             
             logger.info(f"Retrieved {len(all_events)} total events, filtered to {len(enriched_events)} active events, returning top {len(top_events)} by 24h volume")
             return top_events
