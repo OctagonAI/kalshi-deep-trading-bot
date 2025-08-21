@@ -83,8 +83,9 @@ class SimpleTradingBot:
             self.console.print(f"[blue]Kelly sizing: Enabled (fraction: {self.config.kelly_fraction}, bankroll: ${self.config.bankroll})[/blue]")
         self.console.print(f"[blue]Portfolio selection: {self.config.portfolio_selection_method} (max positions: {self.config.max_portfolio_positions})[/blue]\n")
         if self.max_close_ts is not None:
-            minutes_from_now = int((self.max_close_ts - int(time.time())) / 60)
-            self.console.print(f"[blue]Market expiration filter: close before ~{minutes_from_now} minutes from now[/blue]")
+            hours_from_now = (self.max_close_ts - int(time.time())) / 3600
+            # Show one decimal hour precision
+            self.console.print(f"[blue]Market expiration filter: close before ~{hours_from_now:.1f} hours from now[/blue]")
     
     def calculate_risk_adjusted_metrics(self, research_prob: float, market_price: float, action: str) -> dict:
         """
@@ -1743,11 +1744,11 @@ Configuration:
         help='Enable live trading (default: dry run mode)'
     )
     parser.add_argument(
-        '--max-expiration-minutes',
+        '--max-expiration-hours',
         type=int,
         default=None,
-        dest='max_expiration_minutes',
-        help='Only include markets that close within this many minutes from now.'
+        dest='max_expiration_hours',
+        help='Only include markets that close within this many hours from now (minimum 1 hour).'
     )
     
     parser.add_argument(
@@ -1762,8 +1763,9 @@ Configuration:
     # Try to load config and run bot
     try:
         max_close_ts = None
-        if args.max_expiration_minutes is not None and args.max_expiration_minutes > 0:
-            max_close_ts = int(time.time()) + (args.max_expiration_minutes * 60)
+        if args.max_expiration_hours is not None:
+            hours = max(1, args.max_expiration_hours)
+            max_close_ts = int(time.time()) + (hours * 3600)
         asyncio.run(main(live_trading=args.live, max_close_ts=max_close_ts))
     except Exception as e:
         console = Console()
