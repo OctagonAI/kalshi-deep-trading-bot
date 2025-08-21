@@ -84,6 +84,18 @@ uv run trading_bot.py --live
 uv run trading-bot --live
 ```
 
+### Optional: Filter markets by soonest expiration
+
+You can limit markets to those closing within a certain number of minutes from now using `--max-expiration-minutes`. This converts to the Kalshi API's `max_close_ts` (Unix timestamp) automatically.
+
+```bash
+# Only include markets that close within the next 45 minutes
+uv run trading-bot --max-expiration-minutes 45
+
+# Combine with live trading
+uv run trading-bot --live --max-expiration-minutes 30
+```
+
 ## Configuration
 
 Key settings in `.env`:
