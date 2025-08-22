@@ -583,18 +583,21 @@ class SimpleTradingBot:
             If the research doesn't provide a clear probability for a market, make your best estimate based on the available information.
             """
             
-            # Use GPT-4o to extract probabilities with structured output
-            response = await self.openai_client.beta.chat.completions.parse(
-                model="gpt-4o",
+            # Use Responses API structured outputs
+            from openai_utils import responses_parse_pydantic
+            extraction = await responses_parse_pydantic(
+                self.openai_client,
+                model=self.config.openai.model if self.config.openai.model else "gpt-4o",
                 messages=[
                     {"role": "system", "content": "You are a professional prediction market analyst. Extract probability estimates from research with structured output."},
                     {"role": "user", "content": prompt}
                 ],
                 response_format=ProbabilityExtraction,
+                reasoning_effort="low",
+                text_verbosity="medium",
             )
-            
-            # Return the extracted probabilities
-            return event_ticker, response.choices[0].message.parsed
+
+            return event_ticker, extraction
             
         except Exception as e:
             logger.error(f"Error extracting probabilities for {event_ticker}: {e}")
@@ -1147,17 +1150,19 @@ class SimpleTradingBot:
         """
         
         try:
-            response = await self.openai_client.beta.chat.completions.parse(
+            # Use Responses API structured outputs
+            from openai_utils import responses_parse_pydantic
+            analysis = await responses_parse_pydantic(
+                self.openai_client,
                 model=self.config.openai.model,
                 messages=[
                     {"role": "system", "content": "You are a professional prediction market trader."},
                     {"role": "user", "content": prompt}
                 ],
                 response_format=MarketAnalysis,
+                reasoning_effort="low",
+                text_verbosity="medium",
             )
-            
-            # Access the parsed response (correct OpenAI API format)
-            analysis = response.choices[0].message.parsed
             
             # Enrich decisions with human-readable names
             analysis = self._add_human_readable_names(analysis, event_info, markets)
