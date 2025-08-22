@@ -85,16 +85,27 @@ class OctagonClient:
             event_ticker = event.get('event_ticker', 'UNKNOWN')
             logger.info(f"Starting deep research for event {event_ticker} (this may take several minutes)...")
             
-            response = await self.client.chat.completions.create(
+            # Use Responses API to handle models that may return reasoning + message
+            response = await self.client.responses.create(
                 model="octagon-deep-research-agent",
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1
+                input=[{"role": "user", "content": prompt}],
+                reasoning={"effort": "minimal"},
+                text={"verbosity": "medium"}
             )
-            
+
             logger.info(f"Completed deep research for event {event_ticker}")
-            return response.choices[0].message.content
+
+            # Extract the completed assistant message content safely
+            try:
+                from openai_utils import extract_completed_message_text
+                content_text = extract_completed_message_text(response)
+                if content_text:
+                    return content_text
+            except Exception:
+                pass
+
+            # Fallback: return empty string if nothing could be extracted
+            return ""
             
         except Exception as e:
             logger.error(f"Error researching event {event.get('event_ticker', '')}: {e}")
