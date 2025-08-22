@@ -114,31 +114,28 @@ async def responses_parse_pydantic(
         # Pydantic v1 fallback
         schema = response_format.schema()  # type: ignore[attr-defined]
 
+    # Inject a strict schema instruction to ensure JSON-only output
+    schema_str = json.dumps(schema)
+    schema_instruction = {
+        "role": "system",
+        "content": (
+            "You must respond with ONLY a single JSON object that validates against the following JSON Schema. "
+            "Do not include any prose, code fences, or additional text. If a field is optional, omit it instead of writing null.\n\n"
+            f"JSON Schema: {schema_str}"
+        ),
+    }
+
+    # Prepend schema instruction
+    normalized_with_schema = [schema_instruction] + list(normalized)
+
     resp = await client.responses.create(
         model=model,
-        input=normalized,
+        input=normalized_with_schema,
         reasoning={"effort": reasoning_effort},
         text={"verbosity": text_verbosity},
-        response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": response_format.__name__,
-                "schema": schema,
-                "strict": True,
-            },
-        },
     )
 
-    parsed = getattr(resp, "output_parsed", None) or (isinstance(resp, dict) and resp.get("output_parsed"))
-    if parsed is not None:
-        # Validate into the Pydantic model
-        try:
-            return cast(T, response_format.model_validate(parsed))
-        except Exception:
-            # Pydantic v1 fallback
-            return cast(T, response_format.parse_obj(parsed))  # type: ignore[attr-defined]
-
-    # Fallback: try to parse JSON from the completed message text
+    # Parse JSON from the completed message text
     text_value = extract_completed_message_text(resp)
     if text_value:
         try:
