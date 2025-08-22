@@ -593,7 +593,7 @@ class SimpleTradingBot:
                     {"role": "user", "content": prompt}
                 ],
                 response_format=ProbabilityExtraction,
-                reasoning_effort="minimal",
+                reasoning_effort="low",
                 text_verbosity="medium",
             )
 
@@ -1160,7 +1160,7 @@ class SimpleTradingBot:
                     {"role": "user", "content": prompt}
                 ],
                 response_format=MarketAnalysis,
-                reasoning_effort="minimal",
+                reasoning_effort="low",
                 text_verbosity="medium",
             )
             

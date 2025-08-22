@@ -8,6 +8,7 @@ This module provides helpers to:
 """
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union, cast
+import json
 
 from pydantic import BaseModel
 
@@ -69,7 +70,7 @@ async def responses_create_text(
     *,
     model: str,
     messages: Sequence[Dict[str, Any]],
-    reasoning_effort: str = "minimal",
+    reasoning_effort: str = "low",
     text_verbosity: str = "medium",
 ) -> str:
     """
@@ -94,7 +95,7 @@ async def responses_parse_pydantic(
     model: str,
     messages: Sequence[Dict[str, Any]],
     response_format: Type[T],
-    reasoning_effort: str = "minimal",
+    reasoning_effort: str = "low",
     text_verbosity: str = "medium",
 ) -> T:
     """
@@ -106,34 +107,49 @@ async def responses_parse_pydantic(
     """
     normalized = _normalize_messages_input(messages)
 
-    # Prefer native parse if available in SDK
-    if hasattr(client, "responses") and hasattr(client.responses, "parse"):
-        resp = await client.responses.parse(
-            model=model,
-            input=normalized,
-            response_format=response_format,
-            reasoning={"effort": reasoning_effort},
-            text={"verbosity": text_verbosity},
-        )
+    # Build JSON schema from the Pydantic model
+    try:
+        schema = response_format.model_json_schema()
+    except Exception:
+        # Pydantic v1 fallback
+        schema = response_format.schema()  # type: ignore[attr-defined]
 
-        parsed = getattr(resp, "output_parsed", None)
-        if parsed is not None:
-            return cast(T, parsed)
+    resp = await client.responses.create(
+        model=model,
+        input=normalized,
+        reasoning={"effort": reasoning_effort},
+        text={"verbosity": text_verbosity},
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": response_format.__name__,
+                "schema": schema,
+                "strict": True,
+            },
+        },
+    )
 
-        # Fallback: try to find parsed on the completed message item
+    parsed = getattr(resp, "output_parsed", None) or (isinstance(resp, dict) and resp.get("output_parsed"))
+    if parsed is not None:
+        # Validate into the Pydantic model
         try:
-            output_items = getattr(resp, "output", None) or resp.get("output", [])  # type: ignore[attr-defined]
+            return cast(T, response_format.model_validate(parsed))
         except Exception:
-            output_items = []
-        for item in output_items or []:
-            item_type = getattr(item, "type", None) or (isinstance(item, dict) and item.get("type"))
-            item_status = getattr(item, "status", None) or (isinstance(item, dict) and item.get("status"))
-            if item_type == "message" and item_status == "completed":
-                candidate = getattr(item, "parsed", None) or (isinstance(item, dict) and item.get("parsed"))
-                if candidate is not None:
-                    return cast(T, candidate)
+            # Pydantic v1 fallback
+            return cast(T, response_format.parse_obj(parsed))  # type: ignore[attr-defined]
 
-    # Absolute fallback: raise a helpful error
-    raise RuntimeError("Structured output parsing failed: no output_parsed found in Responses API result.")
+    # Fallback: try to parse JSON from the completed message text
+    text_value = extract_completed_message_text(resp)
+    if text_value:
+        try:
+            data = json.loads(text_value)
+            try:
+                return cast(T, response_format.model_validate(data))
+            except Exception:
+                return cast(T, response_format.parse_obj(data))  # type: ignore[attr-defined]
+        except Exception as exc:
+            raise RuntimeError(f"Structured output parsing failed: invalid JSON in model output: {exc}")
+
+    raise RuntimeError("Structured output parsing failed: no output_parsed or JSON text found in Responses API result.")
 
 

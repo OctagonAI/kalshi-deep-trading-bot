@@ -89,7 +89,7 @@ class OctagonClient:
             response = await self.client.responses.create(
                 model="octagon-deep-research-agent",
                 input=[{"role": "user", "content": prompt}],
-                reasoning={"effort": "minimal"},
+                reasoning={"effort": "low"},
                 text={"verbosity": "medium"}
             )
 
