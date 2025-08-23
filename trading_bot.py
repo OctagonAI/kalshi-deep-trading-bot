@@ -1673,13 +1673,18 @@ class SimpleTradingBot:
                 'market_settlement_value', 'market_settlement_value_dollars'
             ]
 
-            # Only include fields that appear in at least one row
-            present_extra_fields = []
-            for f in additional_market_fields:
-                if any(f in row and row[f] is not None for row in csv_data):
-                    present_extra_fields.append(f)
+            # Include any keys present in rows (regardless of None), ordered with the preferred list first
+            base_set = set(fieldnames)
+            present_keys = set()
+            for row in csv_data:
+                for k in row.keys():
+                    if k not in base_set:
+                        present_keys.add(k)
 
-            fieldnames.extend(present_extra_fields)
+            ordered_extras = [f for f in additional_market_fields if f in present_keys]
+            # Include any other unexpected keys deterministically (sorted for stability)
+            remaining_extras = sorted(k for k in present_keys if k not in set(ordered_extras))
+            fieldnames.extend(ordered_extras + remaining_extras)
             
             with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
