@@ -1547,6 +1547,7 @@ class SimpleTradingBot:
             
             # Legacy edge calculation removed - now using R-score instead
             
+            # Build base row (existing columns preserved)
             csv_row = {
                 # Basic info
                 'timestamp': datetime.now().isoformat(),
@@ -1586,6 +1587,55 @@ class SimpleTradingBot:
                 'research_summary': research_summary,
                 'raw_research': raw_research.replace('\n', ' ').replace('\r', ' ') if raw_research else ''
             }
+
+            # Enrich with full market attributes (do not remove any existing columns)
+            # Put title fields first among the newly added market columns
+            market_enriched = {}
+            if decision.ticker in market_odds:
+                m = market_odds[decision.ticker]
+                # Title-related fields first
+                market_enriched['market_title_full'] = m.get('title')
+                market_enriched['market_subtitle'] = m.get('subtitle')
+                market_enriched['market_yes_sub_title'] = m.get('yes_sub_title')
+                market_enriched['market_no_sub_title'] = m.get('no_sub_title')
+                
+                # Remaining attributes (aligned to Kalshi market schema when present)
+                market_enriched.update({
+                    'market_event_ticker': m.get('event_ticker'),
+                    'market_market_type': m.get('market_type'),
+                    'market_open_time': m.get('open_time'),
+                    'market_close_time': m.get('close_time'),
+                    'market_expiration_time': m.get('expiration_time'),
+                    'market_latest_expiration_time': m.get('latest_expiration_time'),
+                    'market_settlement_timer_seconds': m.get('settlement_timer_seconds'),
+                    'market_status': m.get('status'),
+                    'market_response_price_units': m.get('response_price_units'),
+                    'market_notional_value': m.get('notional_value'),
+                    'market_tick_size': m.get('tick_size'),
+                    'market_yes_bid': m.get('yes_bid'),
+                    'market_yes_ask': m.get('yes_ask'),
+                    'market_no_bid': m.get('no_bid'),
+                    'market_no_ask': m.get('no_ask'),
+                    'market_last_price': m.get('last_price'),
+                    'market_previous_yes_bid': m.get('previous_yes_bid'),
+                    'market_previous_yes_ask': m.get('previous_yes_ask'),
+                    'market_previous_price': m.get('previous_price'),
+                    'market_volume': m.get('volume'),
+                    'market_volume_24h': m.get('volume_24h'),
+                    'market_liquidity': m.get('liquidity'),
+                    'market_open_interest': m.get('open_interest'),
+                    'market_result': m.get('result'),
+                    'market_can_close_early': m.get('can_close_early'),
+                    'market_expiration_value': m.get('expiration_value'),
+                    'market_category': m.get('category'),
+                    'market_risk_limit_cents': m.get('risk_limit_cents'),
+                    'market_rules_primary': m.get('rules_primary'),
+                    'market_rules_secondary': m.get('rules_secondary'),
+                    'market_settlement_value': m.get('settlement_value'),
+                    'market_settlement_value_dollars': m.get('settlement_value_dollars'),
+                })
+            
+            csv_row.update(market_enriched)
             csv_data.append(csv_row)
         
         # Write to CSV
@@ -1608,6 +1658,33 @@ class SimpleTradingBot:
                 # Research context
                 'research_summary', 'raw_research'
             ]
+
+            # Append additional market attributes, with titles first among the new section
+            additional_market_fields = [
+                'market_title_full', 'market_subtitle', 'market_yes_sub_title', 'market_no_sub_title',
+                'market_event_ticker', 'market_market_type', 'market_open_time', 'market_close_time',
+                'market_expiration_time', 'market_latest_expiration_time', 'market_settlement_timer_seconds',
+                'market_status', 'market_response_price_units', 'market_notional_value', 'market_tick_size',
+                'market_yes_bid', 'market_yes_ask', 'market_no_bid', 'market_no_ask', 'market_last_price',
+                'market_previous_yes_bid', 'market_previous_yes_ask', 'market_previous_price',
+                'market_volume', 'market_volume_24h', 'market_liquidity', 'market_open_interest',
+                'market_result', 'market_can_close_early', 'market_expiration_value', 'market_category',
+                'market_risk_limit_cents', 'market_rules_primary', 'market_rules_secondary',
+                'market_settlement_value', 'market_settlement_value_dollars'
+            ]
+
+            # Include any keys present in rows (regardless of None), ordered with the preferred list first
+            base_set = set(fieldnames)
+            present_keys = set()
+            for row in csv_data:
+                for k in row.keys():
+                    if k not in base_set:
+                        present_keys.add(k)
+
+            ordered_extras = [f for f in additional_market_fields if f in present_keys]
+            # Include any other unexpected keys deterministically (sorted for stability)
+            remaining_extras = sorted(k for k in present_keys if k not in set(ordered_extras))
+            fieldnames.extend(ordered_extras + remaining_extras)
             
             with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
