@@ -1521,7 +1521,7 @@ class SimpleTradingBot:
             if decision.ticker in market_odds:
                 odds = market_odds[decision.ticker]
                 
-                # Calculate mid-prices from bid/ask spreads
+                # Pull raw prices directly from API
                 yes_bid = odds.get('yes_bid', 0)
                 no_bid = odds.get('no_bid', 0)
                 yes_ask = odds.get('yes_ask', 0)
@@ -1534,11 +1534,12 @@ class SimpleTradingBot:
                     # One-sided or illiquid market — exclude from CSV
                     continue
 
-                # Calculate mid-prices (same logic as used elsewhere in the bot)
-                if yes_bid > 0 and yes_ask > 0:
-                    market_yes_price = (yes_bid + yes_ask) / 2
-                if no_bid > 0 and no_ask > 0:
-                    market_no_price = (no_bid + no_ask) / 2
+                # Use API ask prices directly for CSV yes/no price columns
+                market_yes_price = yes_ask if yes_ask > 0 else None
+                market_no_price = no_ask if no_ask > 0 else None
+                # Also compute mids for reference (will be appended as extra columns if present)
+                market_yes_mid = (yes_bid + yes_ask) / 2 if yes_bid > 0 and yes_ask > 0 else None
+                market_no_mid = (no_bid + no_ask) / 2 if no_bid > 0 and no_ask > 0 else None
             
             # Skip one-sided markets in CSV output
             if (market_yes_price is None or market_yes_price == 0) or (market_no_price is None or market_no_price == 0):
@@ -1569,6 +1570,8 @@ class SimpleTradingBot:
                 # Market data (original scale 0-100 cents)
                 'market_yes_price': market_yes_price,
                 'market_no_price': market_no_price,
+                'market_yes_mid': market_yes_mid,
+                'market_no_mid': market_no_mid,
                 
                 # Risk-adjusted metrics (hedge-fund style)
                 'expected_return': decision.expected_return,
