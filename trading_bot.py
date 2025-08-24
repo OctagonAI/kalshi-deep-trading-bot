@@ -587,7 +587,7 @@ class SimpleTradingBot:
             from openai_utils import responses_parse_pydantic
             extraction = await responses_parse_pydantic(
                 self.openai_client,
-                model=self.config.openai.model if self.config.openai.model else "gpt-4o",
+                model=self.config.openai.model if self.config.openai.model else "gpt-5",
                 messages=[
                     {"role": "system", "content": "You are a professional prediction market analyst. Extract probability estimates from research with structured output."},
                     {"role": "user", "content": prompt}
@@ -605,7 +605,7 @@ class SimpleTradingBot:
 
     async def extract_probabilities(self, research_results: Dict[str, str], 
                                   event_markets: Dict[str, Dict[str, Any]]) -> Dict[str, ProbabilityExtraction]:
-        """Extract structured probabilities from research results using GPT-4o in parallel."""
+        """Extract structured probabilities from research results using GPT-5 in parallel."""
         self.console.print(f"\n[bold]Step 3.5: Extracting probabilities from research...[/bold]")
         
         probability_extractions = {}

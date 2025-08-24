@@ -61,7 +61,7 @@ class OctagonConfig(BaseModel):
 class OpenAIConfig(BaseModel):
     """OpenAI API configuration."""
     api_key: str = Field(..., description="OpenAI API key")
-    model: str = Field(default="gpt-4o", description="OpenAI model to use")
+    model: str = Field(default="gpt-5", description="OpenAI model to use")
     
     @validator('api_key')
     def validate_api_key(cls, v):
@@ -138,7 +138,7 @@ class BotConfig(BaseSettings):
         
         openai_config = OpenAIConfig(
             api_key=os.getenv("OPENAI_API_KEY", ""),
-            model=os.getenv("OPENAI_MODEL", "gpt-4o")
+            model=os.getenv("OPENAI_MODEL", "gpt-5")
         )
         
         data.update({

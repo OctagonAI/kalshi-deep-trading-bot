@@ -30,7 +30,7 @@ OCTAGON_BASE_URL=https://api-gateway.octagonagents.com/v1
 
 # OpenAI API for structured betting decisions
 OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_MODEL=gpt-4o
+OPENAI_MODEL=gpt-5
 
 # =============================================================================
 # BOT CONFIGURATION
