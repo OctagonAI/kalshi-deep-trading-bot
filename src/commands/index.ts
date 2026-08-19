@@ -44,6 +44,9 @@ import { handleSeries, formatSeriesHuman } from './series.js';
 import { handleEditorialThemes, formatEditorialThemesHuman } from './editorial-themes.js';
 import { handleCatalysts, formatCatalystsHuman } from './catalysts.js';
 import { handleOctagonChat } from './octagon-chat.js';
+import { getDb } from '../db/index.js';
+import { syncSettlements } from '../tools/kalshi/settle.js';
+import { getSettlements, summarizeSettlements } from '../db/settlements.js';
 
 export interface CommandResult {
   output: string;
@@ -129,6 +132,8 @@ export async function handleSlashCommand(input: string): Promise<CommandResult |
       return handlePortfolioSlash('positions');
     case 'orders':
       return handlePortfolioSlash('orders');
+    case 'settlements':
+      return handlePortfolioSlash('settlements');
 
     // ─── Trading ─────────────────────────────────────────────────────
     case 'buy':
@@ -376,6 +381,32 @@ async function handlePortfolioSlash(subview?: string): Promise<CommandResult> {
         return pos !== 0;
       });
       return { output: formatPositions(positions) };
+    }
+
+    if (view === 'settlements') {
+      const db = getDb();
+      const sync = await syncSettlements(db);
+      const summary = summarizeSettlements(db);
+      const recent = getSettlements(db, 15);
+      const lines: string[] = [];
+      lines.push('**Settlements (realized P&L)**');
+      lines.push('');
+      lines.push(`Synced: ${sync.new_settlements} new (${sync.fetched} fetched)${sync.positions_closed ? `, ${sync.positions_closed} local positions closed` : ''}`);
+      lines.push(`Lifetime: ${summary.count} settlements · realized P&L ${summary.total_realized_pnl >= 0 ? '+' : ''}$${summary.total_realized_pnl.toFixed(2)} · fees $${summary.total_fees.toFixed(2)} · ${summary.wins}W/${summary.losses}L`);
+      if (summary.with_model_view > 0) {
+        lines.push(`Model-side outcome: ${summary.model_side_wins}/${summary.with_model_view} settlements went the model's way`);
+      }
+      if (recent.length > 0) {
+        lines.push('');
+        for (const r of recent) {
+          const model = r.model_prob_entry !== null ? ` model=${(r.model_prob_entry * 100).toFixed(0)}%` : '';
+          lines.push(`  ${r.settled_time.slice(0, 10)}  ${r.ticker}  ${r.market_result.toUpperCase()}  ${r.realized_pnl >= 0 ? '+' : ''}$${r.realized_pnl.toFixed(2)}${model}`);
+        }
+      } else {
+        lines.push('');
+        lines.push('No settlements recorded yet.');
+      }
+      return { output: lines.join('\n') };
     }
 
     if (view === 'orders') {

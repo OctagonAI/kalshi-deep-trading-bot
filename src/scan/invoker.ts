@@ -1,7 +1,7 @@
 import { callKalshiApi, KalshiApiError } from '../tools/kalshi/api.js';
 import { logger } from '../utils/logger.js';
 import type { OctagonInvoker, OctagonVariant } from './types.js';
-import { fetchLatestReportMarkdown, generateReportAndWait } from './octagon-reports-api.js';
+import { fetchReportVersions, generateReportAndWait } from './octagon-reports-api.js';
 
 /**
  * Slugify a title for Kalshi website URL paths.
@@ -133,15 +133,20 @@ export async function resolveEventTicker(input: string): Promise<string> {
 export async function callOctagon(input: string, variant: OctagonVariant): Promise<string> {
   if (variant === 'cache' || variant === 'refresh') {
     const eventTicker = await resolveEventTicker(input);
+    // Return the full Reports API envelope (versions metadata + markdown_report)
+    // rather than the bare markdown: the structured model_probability /
+    // outcome_probabilities are what downstream parseReport extracts real
+    // probabilities from — markdown regex extraction is the fallback that
+    // produced 0.5-placeholder edges.
     if (variant === 'cache') {
-      const { markdown, versions } = await fetchLatestReportMarkdown(eventTicker);
-      if (markdown) return markdown;
-      return JSON.stringify({ versions: versions ?? [] });
+      const res = await fetchReportVersions(eventTicker, { version: 'latest' });
+      if (res.markdown_report) return JSON.stringify(res);
+      return JSON.stringify({ versions: res.versions ?? [] });
     }
-    const { markdown } = await generateReportAndWait(eventTicker, {
+    const { envelope } = await generateReportAndWait(eventTicker, {
       onProgress: (msg) => logger.info(`[octagon] ${msg}`),
     });
-    return markdown;
+    return JSON.stringify(envelope);
   }
 
   const apiKey = process.env.OCTAGON_API_KEY;

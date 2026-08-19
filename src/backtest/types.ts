@@ -47,7 +47,17 @@ export interface LegMetrics {
 }
 
 export interface BacktestResult {
-  verdict: { summary: string; significant: boolean; profitable: boolean };
+  verdict: { summary: string; significant: boolean; profitable: boolean; beats_baseline: boolean };
+  /**
+   * Largest peak-to-trough drop of the cumulative flat-bet P&L (edge signals
+   * ordered by close_time), as a fraction of total capital deployed —
+   * comparable to flat_bet_roi. ROI alone hides interim losses.
+   */
+  max_drawdown_pct: number;
+  /** flat_bet_roi / max_drawdown_pct (Calmar-like). Infinity when DD is 0 and ROI > 0. */
+  risk_adjusted_return: number;
+  /** Model ROI minus always-NO ROI on the SAME edge-signal rows, in points. */
+  alpha_vs_always_no_pp: number;
   days: number;
   events_scored: number;
   markets_resolved: number;

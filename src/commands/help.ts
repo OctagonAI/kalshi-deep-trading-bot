@@ -45,6 +45,7 @@ ${p}portfolio positions          Open positions with P&L
 ${p}portfolio orders             Resting orders
 ${p}portfolio balance            Account balance
 ${p}portfolio status             Exchange status${ctx === 'cli' ? ' and setup verification' : ''}
+${p}portfolio settlements        Realized P&L ledger from settled positions (auto-syncs from Kalshi)
 ${ctx === 'cli' ? `
 Flags:
   --performance                     Include win rate, Sharpe, Brier scores

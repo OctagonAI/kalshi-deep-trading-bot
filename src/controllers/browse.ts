@@ -153,7 +153,12 @@ export function formatRawReport(raw: string, ticker: string): string {
   try {
     const parsed = JSON.parse(raw);
 
-    // New cache format: full markdown report in latest_report
+    // Reports API envelope: top-level markdown_report alongside versions[]
+    if (typeof parsed.markdown_report === 'string' && parsed.markdown_report) {
+      return `${header}\n\n${cleanMarkdown(parsed.markdown_report)}`;
+    }
+
+    // Old cache format: full markdown report in latest_report
     if (parsed.latest_report?.markdown_report) {
       return `${header}\n\n${cleanMarkdown(parsed.latest_report.markdown_report)}`;
     }

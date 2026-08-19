@@ -622,3 +622,63 @@ describe('OctagonClient', () => {
     });
   });
 });
+
+// ─── model_prob placeholder regression (Phase-1 fix #1) ─────────────────────
+// A markdown report whose probabilities can't be extracted must be flagged as
+// a cache miss even when drivers/catalysts text is present — otherwise the
+// 0.5 default gets stored in edge_history as a real (fabricated) edge.
+import { describe as describe2, expect as expect2, test as test2 } from 'bun:test';
+import { OctagonClient as OC2 } from '../octagon-client';
+import { getDb as getDb2 } from '../../db/index';
+
+describe2('parseReport placeholder safety net', () => {
+  const client = new OC2(async () => '', getDb2(':memory:'), makeAudit());
+
+  test2('markdown without extractable probs is a cache miss even with drivers', () => {
+    const md = [
+      '# Some Event Report',
+      '## Key Drivers',
+      '- Strong incumbent polling momentum',
+      '- Fundraising totals released last week',
+      '## Catalysts',
+      '- Debate scheduled next month',
+    ].join('\n');
+    const report = client.parseReport(md, 'KX-TEST', 'KX-EVENT', 'cache');
+    expect2(report.cacheMiss).toBe(true);
+    expect2(report.modelProb).toBe(0.5);
+  });
+
+  test2('markdown with an extractable model prob is NOT a miss', () => {
+    const md = 'Model Probability: 62%\nMarket Price: 55%\n## Key Drivers\n- thing';
+    const report = client.parseReport(md, 'KX-TEST', 'KX-EVENT', 'cache');
+    expect2(report.cacheMiss).toBe(false);
+    expect2(report.modelProb).toBeCloseTo(0.62);
+  });
+
+  test2('markdown with an explicit 50% model prob is NOT a miss', () => {
+    const md = 'Model Probability: 50%\nMarket Price: 40%';
+    const report = client.parseReport(md, 'KX-TEST', 'KX-EVENT', 'cache');
+    expect2(report.cacheMiss).toBe(false);
+    expect2(report.modelProb).toBe(0.5);
+  });
+
+  test2('Reports API envelope extracts the real probability', () => {
+    const envelope = JSON.stringify({
+      event_ticker: 'KX-EVENT',
+      venue: 'kalshi',
+      versions: [{
+        run_id: 'r1',
+        event_ticker: 'KX-EVENT',
+        model_probability: 73.5,
+        market_probability: 61,
+        key_takeaway: 'Momentum favors yes.',
+      }],
+      markdown_report: '# Full report body\nModel narrative here.',
+      run_id: 'r1',
+    });
+    const report = client.parseReport(envelope, 'KX-TEST', 'KX-EVENT', 'cache');
+    expect2(report.cacheMiss).toBe(false);
+    expect2(report.modelProb).toBeCloseTo(0.735);
+    expect2(report.marketProb).toBeCloseTo(0.61);
+  });
+});

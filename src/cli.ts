@@ -308,6 +308,7 @@ export async function runCli(options?: { forceSetup?: boolean }) {
       { value: 'orders', label: 'orders', description: 'Resting orders' },
       { value: 'balance', label: 'balance', description: 'Account balance' },
       { value: 'status', label: 'status', description: 'Exchange status' },
+      { value: 'settlements', label: 'settlements', description: 'Realized P&L from settled positions (auto-syncs)' },
     ];
     if (!typed) return subs;
     const lower = typed.toLowerCase();

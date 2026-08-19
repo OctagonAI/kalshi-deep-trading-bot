@@ -223,15 +223,23 @@ export class OctagonClient {
           hasExplicitModelProb = true;
         }
       } else {
-        report = this.extractFromMarkdown(raw, defaults);
+        const extracted = this.extractFromMarkdown(raw, defaults);
+        hasExplicitModelProb = extracted.modelProbExtracted;
+        report = extracted;
       }
     } catch {
       // Not JSON — fall through to regex extraction
-      report = this.extractFromMarkdown(raw, defaults);
+      const extracted = this.extractFromMarkdown(raw, defaults);
+      hasExplicitModelProb = extracted.modelProbExtracted;
+      report = extracted;
     }
 
-    // Detect cache miss: no explicit model probability was provided AND no meaningful content
-    if (!hasExplicitModelProb && report.modelProb === defaults.modelProb && report.drivers.length === 0 && report.catalysts.length === 0) {
+    // A model probability that was neither provided nor extracted means the
+    // 0.5 default is a placeholder, not a view. Storing it as a real edge
+    // fabricates up-to-50pp signals (see edge_history rows with model_prob
+    // exactly 0.5 and cache_miss=0), so flag the report as a miss regardless
+    // of whether drivers/catalysts text was present.
+    if (!hasExplicitModelProb && report.modelProb === defaults.modelProb) {
       report.cacheMiss = true;
     }
 
@@ -398,9 +406,11 @@ export class OctagonClient {
       ) ?? defaults.mispricingSignal,
       drivers: (() => {
         const latestReport = parsed.latest_report as Record<string, unknown> | undefined;
-        const markdownReport = typeof latestReport?.markdown_report === 'string'
-          ? latestReport.markdown_report
-          : null;
+        const markdownReport = typeof parsed.markdown_report === 'string' && parsed.markdown_report
+          ? parsed.markdown_report
+          : typeof latestReport?.markdown_report === 'string'
+            ? latestReport.markdown_report
+            : null;
         const shortAnswer = markdownReport ? this.extractShortAnswer(markdownReport) : null;
         return this.parseDrivers(source.drivers)
           ?? (shortAnswer ? [{ claim: shortAnswer, category: 'economic' as const, impact: 'high' as const }] : null)
@@ -414,7 +424,7 @@ export class OctagonClient {
     };
   }
 
-  private extractFromMarkdown(raw: string, defaults: OctagonReport): OctagonReport {
+  private extractFromMarkdown(raw: string, defaults: OctagonReport): OctagonReport & { modelProbExtracted: boolean } {
     // For multi-outcome reports (World Cup Silver Ball, FOMC ladders, IPO
     // event trees), the per-outcome probabilities live in markdown tables
     // like:
@@ -437,6 +447,7 @@ export class OctagonClient {
       ...defaults,
       modelProb: modelProb ?? defaults.modelProb,
       marketProb: marketProb ?? defaults.marketProb,
+      modelProbExtracted: modelProb !== null,
       mispricingSignal: this.extractSignal(raw) ?? defaults.mispricingSignal,
       drivers: this.extractDrivers(raw),
       catalysts: this.extractCatalysts(raw),

@@ -138,6 +138,62 @@ const PRICE_BANDS: Array<{ label: string; lo: number; hi: number }> = [
  * longshots will look great vs. an always-NO baseline run over the full
  * universe, but mediocre once we compare within the same price band.
  */
+
+/**
+ * Equity-curve risk on the edge signals, ordered by close_time (entry-order
+ * proxy). Max drawdown is the largest peak-to-trough drop of cumulative
+ * flat-bet P&L, expressed as a fraction of total capital deployed so it is
+ * comparable to the ROI number (AI-Trader-style peak tracking). The
+ * risk-adjusted return divides ROI by max drawdown (Calmar-like): it punishes
+ * strategies whose headline ROI rides through deep interim losses.
+ */
+export function computeEquityRisk(edgeSignals: ScoredSignal[], totalCapital: number): {
+  max_drawdown_pct: number;
+  risk_adjusted_return: number;
+} {
+  if (edgeSignals.length === 0 || totalCapital <= 0) {
+    return { max_drawdown_pct: 0, risk_adjusted_return: 0 };
+  }
+  const ordered = [...edgeSignals].sort((a, b) =>
+    String(a.close_time ?? '').localeCompare(String(b.close_time ?? '')),
+  );
+  let equity = 0;
+  let peak = 0;
+  let maxDdAbs = 0;
+  for (const sgl of ordered) {
+    equity += sgl.pnl;
+    peak = Math.max(peak, equity);
+    maxDdAbs = Math.max(maxDdAbs, peak - equity);
+  }
+  const maxDdPct = maxDdAbs / totalCapital;
+  const roi = ordered.reduce((sum, sgl) => sum + sgl.pnl, 0) / totalCapital;
+  const riskAdjusted = maxDdPct > 0 ? roi / maxDdPct : (roi > 0 ? Infinity : 0);
+  return { max_drawdown_pct: maxDdPct, risk_adjusted_return: riskAdjusted };
+}
+
+/**
+ * Always-NO ROI restricted to the SAME edge-signal rows the model bet on —
+ * the apples-to-apples benchmark for the headline alpha. (The universe-wide
+ * always-NO baseline in computeBaselines answers a different question:
+ * structural tilt of the whole post-filter universe.)
+ */
+export function alphaVsAlwaysNoPp(edgeSignals: ScoredSignal[]): number {
+  if (edgeSignals.length === 0) return 0;
+  let noPnl = 0;
+  let noCap = 0;
+  let modelPnl = 0;
+  let modelCap = 0;
+  for (const s of edgeSignals) {
+    noCap += (100 - s.market_then) / 100;
+    noPnl += ((100 - s.market_now) - (100 - s.market_then)) / 100;
+    modelPnl += s.pnl;
+    modelCap += s.capital;
+  }
+  const modelRoi = modelCap > 0 ? modelPnl / modelCap : 0;
+  const noRoi = noCap > 0 ? noPnl / noCap : 0;
+  return (modelRoi - noRoi) * 100;
+}
+
 function computeBaselines(signals: ScoredSignal[]): BacktestResult['baselines'] {
   // Universe-wide always-NO / always-YES on the same post-filter rows.
   const noPnl = (s: ScoredSignal): { pnl: number; capital: number; hit: boolean } => {
@@ -273,7 +329,10 @@ export function computeMetrics(signals: ScoredSignal[], minEdgePp = 0.5): Omit<B
   const n = signals.length;
   if (n === 0) {
     return {
-      verdict: { summary: 'No markets with Octagon coverage found.', significant: false, profitable: false },
+      verdict: { summary: 'No markets with Octagon coverage found.', significant: false, profitable: false, beats_baseline: false },
+      max_drawdown_pct: 0,
+      risk_adjusted_return: 0,
+      alpha_vs_always_no_pp: 0,
       days: 0,
       events_scored: 0,
       markets_resolved: 0,
@@ -356,20 +415,33 @@ export function computeMetrics(signals: ScoredSignal[], minEdgePp = 0.5): Omit<B
   const resolved = signals.filter(s => s.resolved).length;
   const unresolved = signals.filter(s => !s.resolved).length;
 
+  // Risk-adjusted view: max drawdown of the flat-bet equity curve and alpha
+  // over always-NO on the same rows. ROI alone hides both (a +0.9% ROI with
+  // a -18% interim drawdown and negative alpha is not a strategy).
+  const equityRisk = computeEquityRisk(edgeSignals, totalCapital);
+  const alphaPp = alphaVsAlwaysNoPp(edgeSignals);
+
   // Verdict
   const significant = skillCI[0] > 0;
   const profitable = pnl > 0;
+  const beatsBaseline = alphaPp > 0;
+  const riskLine = `alpha vs always-NO ${alphaPp >= 0 ? '+' : ''}${alphaPp.toFixed(1)}pp; max DD ${(equityRisk.max_drawdown_pct * 100).toFixed(1)}%`;
   let summary: string;
-  if (skillScore > 0.05 && significant && profitable) {
-    summary = `Model has edge (Skill +${(skillScore * 100).toFixed(1)}% [CI: +${(skillCI[0] * 100).toFixed(1)}%, +${(skillCI[1] * 100).toFixed(1)}%]; ROI +${(roi * 100).toFixed(1)}%)`;
+  if (skillScore > 0.05 && significant && profitable && beatsBaseline) {
+    summary = `Model has edge (Skill +${(skillScore * 100).toFixed(1)}% [CI: +${(skillCI[0] * 100).toFixed(1)}%, +${(skillCI[1] * 100).toFixed(1)}%]; ROI +${(roi * 100).toFixed(1)}%; ${riskLine})`;
+  } else if (skillScore > 0.05 && significant && profitable && !beatsBaseline) {
+    summary = `ROI is baseline tilt, not selection skill (ROI +${(roi * 100).toFixed(1)}% but ${riskLine})`;
   } else if (skillScore > 0 && !significant) {
-    summary = `Inconclusive — need more data (Skill +${(skillScore * 100).toFixed(1)}%, CI includes zero)`;
+    summary = `Inconclusive — need more data (Skill +${(skillScore * 100).toFixed(1)}%, CI includes zero; ${riskLine})`;
   } else {
-    summary = `No edge detected (Skill ${(skillScore * 100).toFixed(1)}%)`;
+    summary = `No edge detected (Skill ${(skillScore * 100).toFixed(1)}%; ${riskLine})`;
   }
 
   return {
-    verdict: { summary, significant, profitable },
+    verdict: { summary, significant, profitable, beats_baseline: beatsBaseline },
+    max_drawdown_pct: equityRisk.max_drawdown_pct,
+    risk_adjusted_return: equityRisk.risk_adjusted_return,
+    alpha_vs_always_no_pp: alphaPp,
     days: 0, // filled by caller
     events_scored: uniqueEvents.size,
     markets_resolved: resolved,

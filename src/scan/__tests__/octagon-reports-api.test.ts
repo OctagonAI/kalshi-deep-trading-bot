@@ -64,7 +64,7 @@ describe('fetchReportVersions', () => {
     const res = await fetchReportVersions('KXTEST-26');
     expect(res.versions).toEqual([]);
     expect(n).toBe(2);
-  });
+  }, 15_000);
 });
 
 describe('triggerReportGeneration', () => {
@@ -122,5 +122,57 @@ describe('fetchReportRunStatus', () => {
     responder = () => json(200, { run_id: 'r', status: 'processing', venue: 'kalshi', event_ticker: null, requested_url: null });
     const res = await fetchReportRunStatus('r');
     expect(res.status).toBe('processing');
+  });
+});
+
+// ─── 524 resilience (Phase-1 #3) ────────────────────────────────────────────
+import { describe as d4, expect as e4, test as t4 } from 'bun:test';
+import { isAmbiguousGenerationFailure } from '../octagon-reports-api';
+
+d4('524 resilience', () => {
+  t4('524 on GET retries then succeeds', async () => {
+    let n = 0;
+    responder = () => (++n === 1
+      ? new Response('gateway timeout', { status: 524 })
+      : json(200, { event_ticker: 'KXTEST-26', venue: 'kalshi', requested_url: null, versions: [], markdown_report: null, run_id: null }));
+    const res = await fetchReportVersions('KXTEST-26');
+    e4(res.versions).toEqual([]);
+    e4(n).toBe(2);
+  }, 15_000);
+
+  t4('ambiguity classifier: gateway statuses yes, definite rejections no', () => {
+    e4(isAmbiguousGenerationFailure(new OctagonReportsApiError(524, null, 'x'))).toBe(true);
+    e4(isAmbiguousGenerationFailure(new OctagonReportsApiError(503, 'service_unavailable', 'x'))).toBe(true);
+    e4(isAmbiguousGenerationFailure(new Error('Octagon reports API timed out after 60s (POST /x)'))).toBe(true);
+    e4(isAmbiguousGenerationFailure(new OctagonReportsApiError(409, 'kalshi_market_not_open', 'x'))).toBe(false);
+    e4(isAmbiguousGenerationFailure(new OctagonReportsApiError(429, 'insufficient_credits', 'x'))).toBe(false);
+  });
+
+  t4('ambiguous POST recovers by watching ?version=latest', async () => {
+    let latestCalls = 0;
+    responder = (url, init) => {
+      if (init?.method === 'POST') return new Response('cf timeout', { status: 524 });
+      if (url.includes('version=latest')) {
+        latestCalls++;
+        if (latestCalls < 2) {
+          // still the old version
+          return json(200, { event_ticker: 'KXTEST-26', venue: 'kalshi', requested_url: null, versions: [{ run_id: 'old-run' }], markdown_report: '# Old', run_id: 'old-run' });
+        }
+        return json(200, { event_ticker: 'KXTEST-26', venue: 'kalshi', requested_url: null, versions: [{ run_id: 'new-run' }], markdown_report: '# Fresh after 524', run_id: 'new-run' });
+      }
+      // baseline versions call (no ?version)
+      return json(200, { event_ticker: 'KXTEST-26', venue: 'kalshi', requested_url: null, versions: [{ run_id: 'old-run' }], markdown_report: null, run_id: null });
+    };
+    const res = await generateReportAndWait('KXTEST-26', { pollIntervalMs: 5, timeoutMs: 5_000 });
+    e4(res.markdown).toBe('# Fresh after 524');
+    e4(res.runId).toBe('new-run');
+  });
+
+  t4('definite POST rejection does not enter recovery', async () => {
+    responder = (url, init) => {
+      if (init?.method === 'POST') return json(409, { error: { code: 'kalshi_market_not_open', message: 'expired' } });
+      return json(200, { event_ticker: 'KXTEST-26', venue: 'kalshi', requested_url: null, versions: [], markdown_report: null, run_id: null });
+    };
+    await e4(generateReportAndWait('KXTEST-26', { pollIntervalMs: 5, timeoutMs: 1_000 })).rejects.toThrow(/kalshi_market_not_open/);
   });
 });

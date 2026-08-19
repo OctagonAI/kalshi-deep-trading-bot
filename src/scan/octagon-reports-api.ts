@@ -16,7 +16,7 @@ import { logger } from '../utils/logger.js';
 
 const REPORTS_API_BASE = 'https://api.octagonai.co/v1';
 const REQUEST_TIMEOUT_MS = 60_000;
-const GET_RETRY_STATUS = [502, 503, 504];
+const GET_RETRY_STATUS = [502, 503, 504, 522, 524];
 const GET_MAX_RETRIES = 3;
 const GET_RETRY_DELAYS = [5_000, 15_000, 30_000];
 
@@ -197,10 +197,35 @@ export async function generateReportAndWait(
     timeoutMs?: number;
     onProgress?: (msg: string) => void;
   },
-): Promise<{ markdown: string; runId: string }> {
+): Promise<{ markdown: string; runId: string; envelope: ReportVersionsResponse }> {
   const pollInterval = opts?.pollIntervalMs ?? 30_000;
   const timeoutMs = opts?.timeoutMs ?? 600_000;
-  const accepted = await triggerReportGeneration(eventTicker);
+
+  // Snapshot the current latest run BEFORE triggering: if the POST fails
+  // ambiguously (gateway 502/504/524 or a client-side timeout), the run has
+  // often started server-side anyway — the report "lands" as a new version.
+  // Knowing the pre-POST latest run_id lets us recover by watching for a
+  // version we haven't seen instead of surfacing a false-negative error.
+  let baselineRunId: string | null = null;
+  try {
+    const before = await fetchReportVersions(eventTicker);
+    baselineRunId = before.versions[0]?.run_id ?? null;
+  } catch {
+    // Baseline is best-effort; recovery still works with null (any version
+    // newer than "nothing" counts).
+  }
+
+  let accepted: ReportGenerationAccepted;
+  try {
+    accepted = await triggerReportGeneration(eventTicker);
+  } catch (err) {
+    if (!isAmbiguousGenerationFailure(err)) throw err;
+    opts?.onProgress?.(
+      `Generation POST failed ambiguously (${err instanceof Error ? err.message.slice(0, 80) : err}); ` +
+      `watching ?version=latest for the run to land anyway...`,
+    );
+    return recoverFromLatest(eventTicker, baselineRunId, pollInterval, timeoutMs, opts?.onProgress);
+  }
   opts?.onProgress?.(`Generation started (run ${accepted.run_id}). Polling every ${Math.round(pollInterval / 1000)}s...`);
 
   const deadline = Date.now() + timeoutMs;
@@ -224,5 +249,50 @@ export async function generateReportAndWait(
   if (!res.markdown_report) {
     throw new Error(`Report run ${accepted.run_id} completed but no markdown was returned for ${eventTicker}.`);
   }
-  return { markdown: res.markdown_report, runId: accepted.run_id };
+  return { markdown: res.markdown_report, runId: accepted.run_id, envelope: res };
+}
+
+/**
+ * A generation POST failure is "ambiguous" when the request may have reached
+ * the service even though we got no usable answer: gateway errors (502/504,
+ * Cloudflare 522/524), 503, or a client-side timeout. Definite rejections
+ * (400/401/403/404/409/429) are never recovered from.
+ */
+export function isAmbiguousGenerationFailure(err: unknown): boolean {
+  if (err instanceof OctagonReportsApiError) {
+    return [502, 503, 504, 522, 524].includes(err.statusCode);
+  }
+  return err instanceof Error && /timed out/i.test(err.message);
+}
+
+/** Poll ?version=latest until a run different from `baselineRunId` lands. */
+async function recoverFromLatest(
+  eventTicker: string,
+  baselineRunId: string | null,
+  pollInterval: number,
+  timeoutMs: number,
+  onProgress?: (msg: string) => void,
+): Promise<{ markdown: string; runId: string; envelope: ReportVersionsResponse }> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, pollInterval));
+    let latest: ReportVersionsResponse | null = null;
+    try {
+      latest = await fetchReportVersions(eventTicker, { version: 'latest' });
+    } catch {
+      // transient — keep polling until the deadline
+    }
+    const newRun = latest?.versions[0]?.run_id;
+    if (latest?.markdown_report && newRun && newRun !== baselineRunId) {
+      onProgress?.(`Recovered: fresh report landed as run ${newRun}.`);
+      return { markdown: latest.markdown_report, runId: newRun, envelope: latest };
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Octagon report generation for ${eventTicker} failed and no new version landed within ` +
+        `${Math.round(timeoutMs / 1000)}s. If credits were charged for a failed run they are refunded automatically.`,
+      );
+    }
+    onProgress?.('No new version yet; still watching...');
+  }
 }

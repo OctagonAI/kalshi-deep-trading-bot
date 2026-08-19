@@ -125,6 +125,32 @@ export function migrate(db: Database): void {
       created_at  INTEGER
     );
 
+    CREATE TABLE IF NOT EXISTS settlements (
+      -- Realized outcomes from Kalshi /portfolio/settlements: the ground
+      -- truth the learning loop (calibration, reflection) is built on.
+      -- One row per (ticker, settled_time) — INSERT OR IGNORE keeps syncs
+      -- idempotent.
+      ticker            TEXT NOT NULL,
+      event_ticker      TEXT NOT NULL,
+      market_result     TEXT NOT NULL,
+      yes_count_fp      REAL NOT NULL DEFAULT 0,
+      no_count_fp       REAL NOT NULL DEFAULT 0,
+      yes_total_cost    REAL NOT NULL DEFAULT 0,
+      no_total_cost     REAL NOT NULL DEFAULT 0,
+      revenue           REAL NOT NULL DEFAULT 0,
+      fee_cost          REAL NOT NULL DEFAULT 0,
+      realized_pnl      REAL NOT NULL DEFAULT 0,
+      settled_time      TEXT NOT NULL,
+      -- Model context at entry, joined from edge_history (nullable: we may
+      -- not have scored the market before entering it).
+      model_prob_entry  REAL,
+      market_prob_entry REAL,
+      edge_entry        REAL,
+      raw_json          TEXT,
+      synced_at         INTEGER NOT NULL,
+      PRIMARY KEY (ticker, settled_time)
+    );
+
     CREATE TABLE IF NOT EXISTS brier_scores (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
       ticker          TEXT NOT NULL,

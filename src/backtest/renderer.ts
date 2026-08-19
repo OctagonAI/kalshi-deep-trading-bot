@@ -109,6 +109,19 @@ export function formatBacktestHuman(result: BacktestResult, opts?: FormatOpts): 
     }
   }
 
+  // ─── Risk-adjusted view ───────────────────────────────────────────────
+  // ROI alone hides interim losses and the structural NO tilt. Max drawdown
+  // is the worst peak-to-trough drop of the flat-bet equity curve; alpha is
+  // the model's ROI minus always-NO ROI on the same rows it bet on.
+  if (result.edge_signals > 0) {
+    lines.push('');
+    lines.push('  RISK-ADJUSTED');
+    lines.push(`    Max drawdown    ${(result.max_drawdown_pct * 100).toFixed(1)}% of deployed capital`);
+    const rar = result.risk_adjusted_return;
+    lines.push(`    ROI / max DD    ${Number.isFinite(rar) ? rar.toFixed(2) : '∞ (no drawdown)'}`);
+    lines.push(`    Alpha vs NO     ${result.alpha_vs_always_no_pp >= 0 ? '+' : ''}${result.alpha_vs_always_no_pp.toFixed(1)}pp (same rows, always-NO benchmark)`);
+  }
+
   // ─── Zero-skill baselines ─────────────────────────────────────────────
   // The headline ROI / hit rate can look strong purely from the universe's
   // structural NO tilt (multi-outcome events resolve mostly NO). These two
