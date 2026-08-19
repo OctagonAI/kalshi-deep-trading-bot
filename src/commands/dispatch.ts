@@ -36,6 +36,7 @@ import { formatMarketSearchHuman, formatMarketsWithEdgeHuman } from './search-re
 import { handleEvents, formatEventsHuman } from './events.js';
 import { handleTrust, formatTrustHuman } from './trust.js';
 import { handleReport, formatReportHuman } from './report.js';
+import { handleOctagonChat } from './octagon-chat.js';
 import { handleSeries, formatSeriesHuman } from './series.js';
 import { handleEditorialThemes, formatEditorialThemesHuman } from './editorial-themes.js';
 import { handleCatalysts, formatCatalystsHuman } from './catalysts.js';
@@ -502,6 +503,20 @@ export async function dispatch(args: ParsedArgs): Promise<void> {
     }
 
     // ─── report (full Octagon markdown report) ─────────────────────────
+    // ─── octagon (conversational Prediction Markets Agent) ────────────
+    if (resolved.canonical === 'octagon') {
+      const res = handleOctagonChat(args.positionalArgs);
+      if ('followUp' in res) {
+        console.log(res.output);
+        const answer = await res.followUp();
+        console.log(answer);
+      } else {
+        console.log(res.output);
+      }
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
     if (resolved.canonical === 'report') {
       const resp = await handleReport(args);
       if (json) {

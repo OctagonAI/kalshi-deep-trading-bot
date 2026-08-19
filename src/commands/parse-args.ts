@@ -15,6 +15,8 @@ const SUBCOMMANDS = [
   'trust',
   // Full markdown report viewer
   'report',
+  // Conversational Prediction Markets Agent
+  'octagon',
 ] as const;
 
 export type Subcommand = (typeof SUBCOMMANDS)[number];

@@ -43,6 +43,7 @@ import { handleReport, formatReportHuman } from './report.js';
 import { handleSeries, formatSeriesHuman } from './series.js';
 import { handleEditorialThemes, formatEditorialThemesHuman } from './editorial-themes.js';
 import { handleCatalysts, formatCatalystsHuman } from './catalysts.js';
+import { handleOctagonChat } from './octagon-chat.js';
 
 export interface CommandResult {
   output: string;
@@ -155,6 +156,15 @@ export async function handleSlashCommand(input: string): Promise<CommandResult |
           return resp.ok ? formatEditorialThemesHuman(resp.data) : (resp.error?.message ?? 'themes failed');
         },
       };
+    }
+
+    // ─── /octagon (conversational Prediction Markets Agent) ─────────
+    case 'octagon': {
+      const res = handleOctagonChat(args);
+      if ('followUp' in res) {
+        return { output: res.output, asyncFollowUp: res.followUp };
+      }
+      return { output: res.output };
     }
 
     // ─── /analyze ────────────────────────────────────────────────────

@@ -1,0 +1,228 @@
+/**
+ * Octagon Prediction Markets Reports API.
+ *
+ * Direct REST access to report versions, bodies, and asynchronous generation —
+ * replaces pulling reports through the Prediction Markets Agent's legacy
+ * `:cache` / `:refresh` model variants.
+ *
+ *   GET  /predictions/reports/kalshi/{event_ticker}            versions (free)
+ *   GET  /predictions/reports/kalshi/{event_ticker}?version=…  + markdown body
+ *   GET  /predictions/reports/status/{run_id}                  run status (free)
+ *   POST /predictions/reports/kalshi/{event_ticker}            fresh run (3 credits, 202)
+ *
+ * Docs: /guide/rest-api/prediction-markets-reports
+ */
+import { logger } from '../utils/logger.js';
+
+const REPORTS_API_BASE = 'https://api.octagonai.co/v1';
+const REQUEST_TIMEOUT_MS = 60_000;
+const GET_RETRY_STATUS = [502, 503, 504];
+const GET_MAX_RETRIES = 3;
+const GET_RETRY_DELAYS = [5_000, 15_000, 30_000];
+
+export interface ReportVersion {
+  run_id: string;
+  event_ticker: string;
+  name: string;
+  captured_at: string;
+  analysis_last_updated: string;
+  market_probability: number;
+  model_probability: number;
+  confidence_score: number;
+  total_volume: number;
+  key_takeaway: string;
+  outcome_probabilities?: Array<{
+    market_ticker: string;
+    outcome_name?: string;
+    model_probability: number;
+    market_probability: number;
+  }> | null;
+}
+
+export interface ReportVersionsResponse {
+  event_ticker: string;
+  venue: 'kalshi' | 'polymarket';
+  requested_url: string | null;
+  versions: ReportVersion[];
+  /** Populated only when a `version` was requested and resolved. */
+  markdown_report: string | null;
+  /** The run `markdown_report` corresponds to; null when no body requested. */
+  run_id: string | null;
+}
+
+export interface ReportRunStatus {
+  run_id: string;
+  status: 'processing' | 'completed' | 'failed';
+  venue: 'kalshi' | 'polymarket';
+  event_ticker: string | null;
+  requested_url: string | null;
+}
+
+export interface ReportGenerationAccepted {
+  run_id: string;
+  status: 'processing';
+  event_ticker: string;
+  venue: 'kalshi' | 'polymarket';
+}
+
+export class OctagonReportsApiError extends Error {
+  constructor(
+    public statusCode: number,
+    public code: string | null,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'OctagonReportsApiError';
+  }
+}
+
+function requireApiKey(): string {
+  const apiKey = process.env.OCTAGON_API_KEY;
+  if (!apiKey) throw new Error('OCTAGON_API_KEY not set. Get one at https://app.octagonai.co');
+  return apiKey;
+}
+
+function baseUrl(): string {
+  return process.env.OCTAGON_BASE_URL ?? REPORTS_API_BASE;
+}
+
+async function toApiError(resp: Response): Promise<OctagonReportsApiError> {
+  const body = await resp.text().catch(() => '');
+  let code: string | null = null;
+  let message = body.slice(0, 300);
+  try {
+    const parsed = JSON.parse(body) as { error?: { code?: string; message?: string } };
+    code = parsed.error?.code ?? null;
+    message = parsed.error?.message ?? message;
+  } catch {
+    // non-JSON body — keep the raw slice
+  }
+  return new OctagonReportsApiError(resp.status, code, `Octagon reports API ${resp.status}${code ? ` (${code})` : ''}: ${message}`);
+}
+
+async function requestJson<T>(
+  method: 'GET' | 'POST',
+  path: string,
+  opts?: { retry?: boolean },
+): Promise<T> {
+  const apiKey = requireApiKey();
+  const maxRetries = opts?.retry ? GET_MAX_RETRIES : 0;
+
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      const delay = GET_RETRY_DELAYS[attempt - 1];
+      logger.info(`[reports-api] retrying in ${delay / 1000}s (attempt ${attempt + 1}/${maxRetries + 1})`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let resp: Response;
+    try {
+      resp = await fetch(`${baseUrl()}${path}`, {
+        method,
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timer);
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        lastError = new Error(`Octagon reports API timed out after ${REQUEST_TIMEOUT_MS / 1000}s (${method} ${path})`);
+        if (attempt < maxRetries) continue;
+        throw lastError;
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (resp.ok) return (await resp.json()) as T;
+
+    if (GET_RETRY_STATUS.includes(resp.status) && attempt < maxRetries) {
+      lastError = await toApiError(resp);
+      continue;
+    }
+    throw await toApiError(resp);
+  }
+  throw lastError ?? new Error('Octagon reports API request failed');
+}
+
+/**
+ * List report versions for an event; pass `version` ('latest' or a run_id)
+ * to also receive `markdown_report`.
+ */
+export async function fetchReportVersions(
+  eventTicker: string,
+  opts?: { version?: string },
+): Promise<ReportVersionsResponse> {
+  const qs = opts?.version ? `?version=${encodeURIComponent(opts.version)}` : '';
+  return requestJson<ReportVersionsResponse>(
+    'GET',
+    `/predictions/reports/kalshi/${encodeURIComponent(eventTicker)}${qs}`,
+    { retry: true },
+  );
+}
+
+/** Fetch the latest cached report body, or null when none has been generated. */
+export async function fetchLatestReportMarkdown(eventTicker: string): Promise<{
+  markdown: string | null;
+  runId: string | null;
+  versions: ReportVersion[];
+}> {
+  const res = await fetchReportVersions(eventTicker, { version: 'latest' });
+  return { markdown: res.markdown_report, runId: res.run_id, versions: res.versions };
+}
+
+export async function fetchReportRunStatus(runId: string): Promise<ReportRunStatus> {
+  return requestJson<ReportRunStatus>('GET', `/predictions/reports/status/${encodeURIComponent(runId)}`, { retry: true });
+}
+
+/**
+ * Trigger fresh generation (3 credits, charged on 202; refunded on failure).
+ * Not retried: a retry after an ambiguous failure could double-charge.
+ */
+export async function triggerReportGeneration(eventTicker: string): Promise<ReportGenerationAccepted> {
+  return requestJson<ReportGenerationAccepted>('POST', `/predictions/reports/kalshi/${encodeURIComponent(eventTicker)}`);
+}
+
+/**
+ * Trigger fresh generation and poll until the run completes, then return the
+ * markdown pinned to that run. Docs recommend polling every 30-60s; fresh
+ * generation typically takes several minutes.
+ */
+export async function generateReportAndWait(
+  eventTicker: string,
+  opts?: {
+    pollIntervalMs?: number;
+    timeoutMs?: number;
+    onProgress?: (msg: string) => void;
+  },
+): Promise<{ markdown: string; runId: string }> {
+  const pollInterval = opts?.pollIntervalMs ?? 30_000;
+  const timeoutMs = opts?.timeoutMs ?? 600_000;
+  const accepted = await triggerReportGeneration(eventTicker);
+  opts?.onProgress?.(`Generation started (run ${accepted.run_id}). Polling every ${Math.round(pollInterval / 1000)}s...`);
+
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, pollInterval));
+    const status = await fetchReportRunStatus(accepted.run_id);
+    if (status.status === 'completed') break;
+    if (status.status === 'failed') {
+      throw new Error(`Octagon report generation failed for ${eventTicker} (run ${accepted.run_id}). Credits are refunded automatically.`);
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Octagon report generation timed out after ${Math.round(timeoutMs / 1000)}s (run ${accepted.run_id}, still processing). ` +
+        `Check later with the status endpoint or fetch ?version=latest.`,
+      );
+    }
+    opts?.onProgress?.(`Still processing (run ${accepted.run_id})...`);
+  }
+
+  const res = await fetchReportVersions(accepted.event_ticker || eventTicker, { version: accepted.run_id });
+  if (!res.markdown_report) {
+    throw new Error(`Report run ${accepted.run_id} completed but no markdown was returned for ${eventTicker}.`);
+  }
+  return { markdown: res.markdown_report, runId: accepted.run_id };
+}

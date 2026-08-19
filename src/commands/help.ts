@@ -249,6 +249,23 @@ Flags:
 
 Output ranks pairs ascending by correlation — most-uncorrelated first.`,
 
+    octagon: `**${p}octagon** — Conversational Octagon Prediction Markets Agent
+
+${p}octagon <question>            Ask anything: discovery, screening, reports
+${p}octagon reset                 Start a new conversation
+
+Multi-turn: follow-ups like "which of those has the best expected return?"
+keep the conversation context. The agent accepts market URLs, tickers, and
+plain-English descriptions.
+
+Examples:
+  ${p}octagon Where does the model disagree most with market prices in Politics?
+  ${p}octagon Find markets like "Fed cuts rates twice this year"
+  ${p}octagon Show me the 10 most active markets by 24-hour volume
+
+Billing: discovery queries 1 credit; fresh reports 3 credits; cached reports
+and conversational follow-ups free.`,
+
     report: `**${p}report** — Print the full Octagon markdown report for an event
 
 ${p}report <event_ticker>           Cached report body (most recent)
@@ -503,6 +520,7 @@ Portfolio construction:
   basket candles --tickers ...  OHLC bars for a weighted basket NAV
 
 Analysis & Trading:
+  octagon <question>            Conversational Octagon agent (multi-turn)
   analyze <ticker>              Full report: edge, drivers, Kelly sizing
   analyze <ticker> --refresh    Force fresh Octagon report
   buy <ticker> <n> [price] [yes|no]   Buy contracts (price in cents)
@@ -583,6 +601,7 @@ Portfolio construction:
   /basket candles --tickers ...  OHLC bars for a weighted basket NAV
 
 Analysis:
+  /octagon <question>            Conversational Octagon agent (multi-turn)
   /backtest                      Model accuracy scorecard + live edge scanner
   /analyze <ticker>              Full report: edge, drivers, Kelly sizing
   /analyze <ticker> refresh      Force fresh Octagon report

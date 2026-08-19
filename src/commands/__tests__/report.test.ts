@@ -145,8 +145,15 @@ describe('handleReport', () => {
       if (url.includes('/trade-api/v2/series/')) {
         return jsonResponse({ series: { title: 'Apple CEO Change' } });
       }
-      if (url.includes('/responses')) {
-        return jsonResponse({ output_text: '# Report body' });
+      if (url.includes('/predictions/reports/kalshi/')) {
+        return jsonResponse({
+          event_ticker: 'KXAAPLCEOCHANGE',
+          venue: 'kalshi',
+          requested_url: null,
+          versions: [{ run_id: 'run-1' }],
+          markdown_report: '# Report body',
+          run_id: 'run-1',
+        });
       }
       return jsonResponse({});
     });
