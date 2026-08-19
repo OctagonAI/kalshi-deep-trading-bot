@@ -1,4 +1,5 @@
 import { callKalshiApi } from '../tools/kalshi/api.js';
+import { buildV2Order, cancelOrderV2, placeOrderV2 } from '../tools/kalshi/orders-v2.js';
 import type { KalshiOrder, KalshiPosition } from '../tools/kalshi/types.js';
 import type { KalshiBalanceResponse } from './formatters.js';
 import {
@@ -57,11 +58,32 @@ export interface CommandResult {
   asyncFollowUp?: () => Promise<string>;
 }
 
+/**
+ * Split a command line into tokens, honoring double/single quotes so
+ * multi-word values survive: `--theme "Bitcoin Breakout"` → ['--theme', 'Bitcoin Breakout'].
+ * Unterminated quotes fall back to whitespace splitting of the remainder.
+ */
+export function tokenizeCommand(line: string): string[] {
+  const tokens: string[] = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line)) !== null) {
+    if (m[3] !== undefined && (m[3].includes('"') || m[3].includes("'"))) {
+      // Token glued to a quote (e.g. --theme"x" or an unterminated quote):
+      // strip quote chars rather than losing the token.
+      tokens.push(m[3].replace(/["']/g, ''));
+    } else {
+      tokens.push(m[1] ?? m[2] ?? m[3]!);
+    }
+  }
+  return tokens;
+}
+
 export async function handleSlashCommand(input: string): Promise<CommandResult | null> {
   const trimmed = input.trim();
   if (!trimmed.startsWith('/')) return null;
 
-  const parts = trimmed.slice(1).trim().split(/\s+/);
+  const parts = tokenizeCommand(trimmed.slice(1).trim());
   const command = parts[0]?.toLowerCase();
   const args = parts.slice(1);
   // Enrich Octagon-Kalshi commands with subview/mode flags so analytics can
@@ -310,22 +332,22 @@ export async function executePendingTrade(trade: NonNullable<CommandResult['pend
     if ('error' in quoteResult) return quoteResult.error;
     effectivePrice = quoteResult.cents;
   }
-  const body: Record<string, unknown> = {
-    ticker: trade.ticker,
-    action: trade.action,
-    side: trade.side,
-    type: 'limit',
-    count: trade.count,
-    ...(trade.side === 'no'
-      ? { no_price: effectivePrice }
-      : { yes_price: effectivePrice }),
-  };
-
-  const data = await callKalshiApi('POST', '/portfolio/orders', { body });
-  const order = data.order as Record<string, unknown> | undefined;
+  // effectivePrice is quoted on the chosen side; buildV2Order maps it onto
+  // the V2 YES-side book (buy NO at p → sell YES at 1 - p).
+  const data = await placeOrderV2(
+    buildV2Order({
+      ticker: trade.ticker,
+      action: trade.action,
+      side: trade.side,
+      count: trade.count,
+      priceCents: effectivePrice,
+    })
+  );
   trackEvent('trade_executed', { action: trade.action, side: trade.side, success: 'true' });
-  if (order) {
-    return `Order placed. ID: ${order.order_id} | Status: ${order.status}`;
+  if (data.order_id) {
+    const filled = parseFloat(String(data.fill_count ?? '0'));
+    const remaining = parseFloat(String(data.remaining_count ?? '0'));
+    return `Order placed. ID: ${data.order_id} | Filled: ${filled} | Resting: ${remaining}`;
   }
   return `Order submitted. Response: ${JSON.stringify(data)}`;
 }
@@ -444,11 +466,12 @@ async function handleCancel(orderId: string | undefined): Promise<CommandResult>
   if (!orderId) return { output: 'Usage: /cancel <order_id>' };
 
   try {
-    await callKalshiApi('DELETE', `/portfolio/orders/${orderId}`);
+    const res = await cancelOrderV2(orderId);
+    const reduced = res.reduced_by !== undefined ? ` (${res.reduced_by} contracts canceled)` : '';
+    return { output: `Order ${orderId} canceled.${reduced}` };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const hint = msg.includes('404') ? ' (order not found or already filled)' : '';
     return { output: `Cancel failed: ${msg}${hint}` };
   }
-  return { output: `Order ${orderId} canceled.` };
 }

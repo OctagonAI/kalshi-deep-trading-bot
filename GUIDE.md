@@ -413,7 +413,7 @@ Routes natural language trade instructions to the appropriate trading action. **
 | Tool | Purpose | Key Parameters |
 |---|---|---|
 | `place_order` | Place a single order | `ticker`, `action` (buy/sell), `side` (yes/no), `type` (limit/market), `count`, `yes_price` (1-99 cents) |
-| `amend_order` | Modify a resting order | `order_id`, `count`, `yes_price`, `expiration_ts` |
+| `amend_order` | Modify a resting order | `order_id`, `ticker`, `action`, `side`, `count`, `yes_price` |
 | `cancel_order` | Cancel one order | `order_id` |
 | `cancel_orders` | Batch cancel | `order_ids[]` |
 | `place_batch_orders` | Place multiple orders at once | `orders[]` (array of order specs) |

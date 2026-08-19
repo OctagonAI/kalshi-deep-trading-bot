@@ -137,12 +137,13 @@ export interface ClusterMembership {
 export interface ClusterPeersResponse {
   market_ticker: string;
   kind: 'thematic' | 'behavioral';
+  /** Null when the market has no cluster assignment in the current run. */
   cluster: {
     cluster_id: number;
     label: string;
     description: string;
     size: number;
-  };
+  } | null;
   data: SimilarMarketRow[];
 }
 
