@@ -89,3 +89,51 @@ describe('summarizeSettlements', () => {
     expect(s.model_side_wins).toBe(1);
   });
 });
+
+// ─── Calibration (Phase-2 #5) ───────────────────────────────────────────────
+import { describe as d5, expect as e5, test as t5 } from 'bun:test';
+import { computeCalibration, categoryOf } from '../../eval/calibration';
+
+d5('computeCalibration', () => {
+  t5('scores model vs market from settlements', () => {
+    const db = freshDb();
+    const seed = (ticker: string, model: number, market: number, result: string, pnl: number) => {
+      db.prepare(
+        `INSERT INTO settlements (ticker, event_ticker, market_result, revenue, realized_pnl, settled_time, model_prob_entry, market_prob_entry, edge_entry, synced_at)
+         VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, 0)`,
+      ).run(ticker, ticker.split('-').slice(0, 2).join('-'), result, pnl, `2026-08-0${(seedN++ % 8) + 1}T00:00:00Z`, model, market, model - market);
+    };
+    let seedN = 0;
+    // Model closer to truth than market on both:
+    seed('KXFED-26SEP-T1', 0.9, 0.6, 'yes', 4);   // model 0.9 vs yes → brier 0.01; market 0.16
+    seed('KXFED-26SEP-T2', 0.1, 0.4, 'no', 2);    // model 0.01; market 0.16
+    const r = computeCalibration(db);
+    e5(r.n_scored).toBe(2);
+    e5(r.brier_model).toBeCloseTo(0.01);
+    e5(r.brier_market).toBeCloseTo(0.16);
+    e5(r.skill).toBeGreaterThan(0.9);
+    e5(r.categories[0].category).toBe('KXFED');
+    e5(r.categories[0].realized_pnl).toBeCloseTo(6);
+    const b90 = r.buckets.find((b) => b.label === '90-100%')!;
+    e5(b90.n).toBe(1);
+    e5(b90.realized_yes_rate).toBe(1);
+  });
+
+  t5('settlements without model view are counted unscored', () => {
+    const db = freshDb();
+    db.prepare(
+      `INSERT INTO settlements (ticker, event_ticker, market_result, revenue, realized_pnl, settled_time, synced_at)
+       VALUES ('KXA-1-T', 'KXA-1', 'no', 0, -1, '2026-08-01T00:00:00Z', 0)`,
+    ).run();
+    const r = computeCalibration(db);
+    e5(r.n_scored).toBe(0);
+    e5(r.n_unscored).toBe(1);
+  });
+});
+
+d5('categoryOf', () => {
+  t5('series prefix from event ticker', () => {
+    e5(categoryOf('KXPRESNOMD-28', 'KXPRESNOMD-28-AOC')).toBe('KXPRESNOMD');
+    e5(categoryOf('', 'KXFED-26SEP-T3')).toBe('KXFED');
+  });
+});

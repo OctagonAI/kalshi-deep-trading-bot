@@ -151,6 +151,54 @@ export function migrate(db: Database): void {
       PRIMARY KEY (ticker, settled_time)
     );
 
+    CREATE TABLE IF NOT EXISTS hypotheses (
+      -- Falsifiable-claim registry (Vibe-Trading pattern). Market-bound
+      -- hypotheses (ticker + predicted_side) are auto-resolved by
+      -- settlement sync; thematic ones resolve manually. Every executed
+      -- trade auto-files one, so the book of live claims is always the
+      -- book of live risk.
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      claim          TEXT NOT NULL,
+      category       TEXT NOT NULL DEFAULT '',
+      ticker         TEXT,
+      event_ticker   TEXT,
+      predicted_side TEXT CHECK (predicted_side IN ('yes', 'no') OR predicted_side IS NULL),
+      status         TEXT NOT NULL DEFAULT 'open'
+                     CHECK (status IN ('open', 'confirmed', 'refuted', 'expired', 'retired')),
+      evidence       TEXT,
+      source         TEXT NOT NULL DEFAULT 'manual',
+      created_at     INTEGER NOT NULL,
+      resolved_at    INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hypotheses_status
+      ON hypotheses(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_hypotheses_ticker
+      ON hypotheses(ticker) WHERE ticker IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS lessons (
+      -- Reflection loop: one terse lesson per settled position with a model
+      -- view, generated from the gap between what the model believed at
+      -- entry and what actually happened. Injected into /analyze context
+      -- for markets in the same category.
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticker        TEXT NOT NULL,
+      event_ticker  TEXT NOT NULL,
+      category      TEXT NOT NULL,
+      settled_time  TEXT NOT NULL,
+      model_prob    REAL NOT NULL,
+      market_prob   REAL,
+      outcome       INTEGER NOT NULL,
+      realized_pnl  REAL NOT NULL,
+      lesson        TEXT NOT NULL,
+      source        TEXT NOT NULL DEFAULT 'llm',
+      created_at    INTEGER NOT NULL,
+      UNIQUE (ticker, settled_time)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_lessons_category
+      ON lessons(category, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS brier_scores (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
       ticker          TEXT NOT NULL,

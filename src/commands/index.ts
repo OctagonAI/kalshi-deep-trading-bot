@@ -47,6 +47,30 @@ import { handleOctagonChat } from './octagon-chat.js';
 import { getDb } from '../db/index.js';
 import { syncSettlements } from '../tools/kalshi/settle.js';
 import { getSettlements, summarizeSettlements } from '../db/settlements.js';
+import { computeCalibration, formatCalibrationHuman } from '../eval/calibration.js';
+import { categoryOf } from '../eval/calibration.js';
+import { generateMissingLessons, getLessonsForCategory, getRecentLessons, formatLessonsForContext } from '../eval/reflection.js';
+import { addHypothesis, resolveHypothesis, listHypotheses, scoreboard, formatHypothesesHuman, type HypothesisStatus } from '../db/hypotheses.js';
+import { callLlm, getFastModel, DEFAULT_MODEL } from '../model/llm.js';
+import { resolveProvider } from '../providers.js';
+
+/** Fast-model wrapper for reflection; null when no provider key is configured. */
+function makeReflectionLlm(): ((prompt: string) => Promise<string>) | undefined {
+  try {
+    const provider = resolveProvider(DEFAULT_MODEL);
+    const model = getFastModel(provider.id, DEFAULT_MODEL);
+    return async (prompt: string) => {
+      const res = await callLlm(prompt, {
+        model,
+        systemPrompt: 'You write terse, falsifiable trading lessons. One sentence, max 30 words, no preamble.',
+      });
+      const c = typeof res.response === 'string' ? res.response : String(res.response.content ?? '');
+      return c;
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 export interface CommandResult {
   output: string;
@@ -161,6 +185,72 @@ export async function handleSlashCommand(input: string): Promise<CommandResult |
           return resp.ok ? formatEditorialThemesHuman(resp.data) : (resp.error?.message ?? 'themes failed');
         },
       };
+    }
+
+    // ─── /hypothesis (falsifiable-claim registry) ───────────────────
+    case 'hypothesis':
+    case 'hypotheses': {
+      const db = getDb();
+      const sub = args[0]?.toLowerCase();
+      if (sub === 'add') {
+        const flagIdx = args.findIndex((a) => a.startsWith('--'));
+        const claim = (flagIdx === -1 ? args.slice(1) : args.slice(1, flagIdx)).join(' ').trim();
+        if (!claim) return { output: 'Usage: /hypothesis add "claim" [--ticker KX... --side yes|no]' };
+        let ticker: string | undefined;
+        let side: 'yes' | 'no' | undefined;
+        for (let i = 1; i < args.length; i++) {
+          if (args[i] === '--ticker') ticker = args[++i]?.toUpperCase();
+          else if (args[i] === '--side') { const v = args[++i]?.toLowerCase(); if (v === 'yes' || v === 'no') side = v; }
+        }
+        const id = addHypothesis(db, { claim, ticker, predictedSide: side });
+        return { output: `Hypothesis #${id} registered${ticker ? ` (auto-resolves when ${ticker} settles)` : ''}.` };
+      }
+      if (sub === 'resolve' || sub === 'retire') {
+        const id = Number(args[1]);
+        if (!Number.isInteger(id)) return { output: `Usage: /hypothesis ${sub} <id>${sub === 'resolve' ? ' <confirmed|refuted> [note]' : ' [note]'}` };
+        const status = sub === 'retire' ? 'retired' : (args[2]?.toLowerCase() as 'confirmed' | 'refuted');
+        if (sub === 'resolve' && status !== 'confirmed' && status !== 'refuted') {
+          return { output: 'Usage: /hypothesis resolve <id> <confirmed|refuted> [note]' };
+        }
+        const note = args.slice(sub === 'retire' ? 2 : 3).join(' ') || undefined;
+        const ok = resolveHypothesis(db, id, status, note);
+        return { output: ok ? `Hypothesis #${id} ${status}.` : `Hypothesis #${id} not found or already resolved.` };
+      }
+      // list (default), optional status filter
+      const statusFilter = (sub === 'list' ? args[1] : sub)?.toLowerCase() as HypothesisStatus | undefined;
+      const valid = ['open', 'confirmed', 'refuted', 'expired', 'retired'];
+      const rows = listHypotheses(db, statusFilter && valid.includes(statusFilter) ? statusFilter : undefined);
+      return { output: formatHypothesesHuman(rows, scoreboard(db)) };
+    }
+
+    // ─── /reflect (generate lessons from settled positions) ─────────
+    case 'reflect': {
+      const db = getDb();
+      await syncSettlements(db).catch(() => { /* offline: use local ledger */ });
+      return {
+        output: 'Reflecting on settled positions...',
+        asyncFollowUp: async () => {
+          const result = await generateMissingLessons(db, { llm: makeReflectionLlm() });
+          const recent = getRecentLessons(db, 10);
+          const lines: string[] = [];
+          lines.push(result.generated > 0
+            ? `Generated ${result.generated} lesson${result.generated === 1 ? '' : 's'} (${result.source}).`
+            : 'No settled positions awaiting reflection.');
+          if (recent.length > 0) {
+            lines.push('');
+            lines.push('Recent lessons:');
+            for (const l of recent) lines.push(`  - [${l.settled_time.slice(0, 10)}] ${l.lesson}`);
+          }
+          return lines.join('\n');
+        },
+      };
+    }
+
+    // ─── /calibration (realized-outcome Brier / skill report) ───────
+    case 'calibration': {
+      const db = getDb();
+      await syncSettlements(db).catch(() => { /* offline: render from local ledger */ });
+      return { output: formatCalibrationHuman(computeCalibration(db)) };
     }
 
     // ─── /octagon (conversational Prediction Markets Agent) ─────────
@@ -359,6 +449,17 @@ export async function executePendingTrade(trade: NonNullable<CommandResult['pend
     })
   );
   trackEvent('trade_executed', { action: trade.action, side: trade.side, success: 'true' });
+  // Auto-file a falsifiable hypothesis for the position: the side that
+  // profits is the predicted settlement. Settlement sync resolves it.
+  try {
+    const predicted = (trade.action === 'buy') === (trade.side === 'yes') ? 'yes' : 'no';
+    addHypothesis(getDb(), {
+      claim: `Model-backed ${trade.action.toUpperCase()} ${trade.side.toUpperCase()} x${trade.count} on ${trade.ticker} at ${effectivePrice}¢ settles ${predicted.toUpperCase()}`,
+      ticker: trade.ticker,
+      predictedSide: predicted,
+      source: 'trade',
+    });
+  } catch { /* registry is additive — never block execution */ }
   if (data.order_id) {
     const filled = parseFloat(String(data.fill_count ?? '0'));
     const remaining = parseFloat(String(data.remaining_count ?? '0'));
@@ -441,7 +542,16 @@ async function handleAnalyzeCommand(args: string[]): Promise<CommandResult> {
   const refresh = args[1]?.toLowerCase() === 'refresh';
   try {
     const data = await handleAnalyze(ticker.toUpperCase(), refresh);
-    return { output: formatAnalyzeHuman(data) };
+    let output = formatAnalyzeHuman(data);
+    // Reflection loop: surface lessons from settled positions in the same
+    // series next to the fresh analysis, so realized errors inform the
+    // next decision instead of being forgotten.
+    try {
+      const lessons = getLessonsForCategory(getDb(), categoryOf(data.eventTicker ?? '', ticker.toUpperCase()));
+      const block = formatLessonsForContext(lessons);
+      if (block) output += `\n\n${block}`;
+    } catch { /* lessons are additive — never break analyze */ }
+    return { output };
   } catch (err) {
     return { output: `Analyze failed: ${err instanceof Error ? err.message : String(err)}` };
   }

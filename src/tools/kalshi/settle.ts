@@ -7,6 +7,8 @@
 import type { Database } from 'bun:sqlite';
 import { callKalshiApi } from './api.js';
 import { recordSettlement, type KalshiSettlement } from '../../db/settlements.js';
+import { resolveHypothesesForSettlement } from '../../db/hypotheses.js';
+import { computeRealizedPnl } from '../../db/settlements.js';
 
 const PAGE_LIMIT = 100;
 const MAX_PAGES = 20;
@@ -35,6 +37,7 @@ export async function syncSettlements(db: Database): Promise<SettleSyncResult> {
       if (recordSettlement(db, s)) {
         newInBatch++;
         closed += closeLocalPosition(db, s);
+        resolveHypothesesForSettlement(db, s.ticker, s.market_result, computeRealizedPnl(s));
       }
     }
     added += newInBatch;

@@ -142,6 +142,9 @@ Type help for commands, or just ask a question.
 | `report <ticker>` | Full Octagon markdown report for an event (accepts event/market/series/URL). `--refresh` forces a fresh pull. |
 | `octagon <question>` | Conversational Octagon Prediction Markets Agent — discovery, edge screens, similar markets, reports; multi-turn (`octagon reset` starts over) |
 | `portfolio settlements` | Realized P&L ledger — auto-syncs settled positions from Kalshi, joined with the model's view at entry |
+| `calibration` | Brier scores and per-category skill vs the market, from realized settlements (reliability buckets included) |
+| `reflect` | Reflection loop — turns each settled position into a terse lesson, re-surfaced inside `analyze` for the same series |
+| `hypothesis` | Falsifiable-claim registry — executed trades auto-file claims, settlements auto-resolve them; add thematic claims manually |
 | `themes` (registry) | Editorial narrative buckets — list/show/import/create/delete/add-series |
 | `themes report` | 25-theme dashboard with SEO + liquidity |
 | `themes audit` | Flag dead themes (high SEO + zero volume) |

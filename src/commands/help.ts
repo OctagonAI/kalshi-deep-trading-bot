@@ -250,6 +250,36 @@ Flags:
 
 Output ranks pairs ascending by correlation — most-uncorrelated first.`,
 
+    hypothesis: `**${p}hypothesis** — Falsifiable-claim registry with lifecycle
+
+${p}hypothesis                    Scoreboard + all claims (open first)
+${p}hypothesis add "claim" [--ticker KX... --side yes|no]
+${p}hypothesis list [open|confirmed|refuted]
+${p}hypothesis resolve <id> <confirmed|refuted> [note]
+${p}hypothesis retire <id> [note]
+
+Claims bound to a ticker + side resolve automatically when the market
+settles; executed trades auto-file one per position. The scoreboard's
+resolved hit rate is the honest record of the strategy's claims.`,
+
+    reflect: `**${p}reflect** — Reflection loop over settled positions
+
+${p}reflect                       Generate terse lessons from settlements without one
+
+Each settled position with a model view becomes a one-line falsifiable
+lesson (LLM-written, deterministic fallback). Lessons for a series are
+shown inside ${p}analyze output for markets in that series, closing the
+loop between realized outcomes and the next decision.`,
+
+    calibration: `**${p}calibration** — Model calibration from realized settlements
+
+${p}calibration                   Brier scores, per-category skill, reliability buckets
+
+Measures the model against ground truth: every settled position is scored
+(model probability at entry vs what actually happened) and compared with
+the market price at entry. Skill > 0 means the model out-forecast the
+market. Data accumulates automatically as positions settle.`,
+
     octagon: `**${p}octagon** — Conversational Octagon Prediction Markets Agent
 
 ${p}octagon <question>            Ask anything: discovery, screening, reports
@@ -522,6 +552,9 @@ Portfolio construction:
 
 Analysis & Trading:
   octagon <question>            Conversational Octagon agent (multi-turn)
+  calibration                   Brier/skill per category from realized settlements
+  reflect                       Generate lessons from settled positions
+  hypothesis                    Falsifiable-claim registry (auto-filed by trades)
   analyze <ticker>              Full report: edge, drivers, Kelly sizing
   analyze <ticker> --refresh    Force fresh Octagon report
   buy <ticker> <n> [price] [yes|no]   Buy contracts (price in cents)
@@ -603,6 +636,9 @@ Portfolio construction:
 
 Analysis:
   /octagon <question>            Conversational Octagon agent (multi-turn)
+  /calibration                   Brier/skill per category from realized settlements
+  /reflect                       Generate lessons from settled positions
+  /hypothesis                    Falsifiable-claim registry (auto-filed by trades)
   /backtest                      Model accuracy scorecard + live edge scanner
   /analyze <ticker>              Full report: edge, drivers, Kelly sizing
   /analyze <ticker> refresh      Force fresh Octagon report

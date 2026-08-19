@@ -101,6 +101,26 @@ export function recordSettlement(db: Database, s: KalshiSettlement): boolean {
       JSON.stringify(s),
       Math.floor(Date.now() / 1000),
     );
+
+  // Materialize the Brier score for calibration when we had a model view at
+  // entry. Uses the entry-time-bounded probability captured above — never the
+  // latest edge row, which would be hindsight.
+  if (result.changes > 0 && entry) {
+    const outcome = s.market_result.toLowerCase() === 'yes' ? 1 : 0;
+    const category = (s.event_ticker ?? s.ticker).split('-')[0] || 'unknown';
+    db.prepare(
+      `INSERT INTO brier_scores (ticker, event_ticker, category, model_prob, actual_outcome, brier_score, settled_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      s.ticker,
+      s.event_ticker ?? '',
+      category,
+      entry.model_prob,
+      outcome,
+      (entry.model_prob - outcome) ** 2,
+      settledEpoch,
+    );
+  }
   return result.changes > 0;
 }
 

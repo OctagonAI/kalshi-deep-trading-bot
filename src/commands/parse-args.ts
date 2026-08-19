@@ -17,6 +17,12 @@ const SUBCOMMANDS = [
   'report',
   // Conversational Prediction Markets Agent
   'octagon',
+  // Realized-outcome calibration report
+  'calibration',
+  // Reflection loop over settled positions
+  'reflect',
+  // Falsifiable-claim registry
+  'hypothesis',
 ] as const;
 
 export type Subcommand = (typeof SUBCOMMANDS)[number];

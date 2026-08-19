@@ -37,6 +37,11 @@ import { handleEvents, formatEventsHuman } from './events.js';
 import { handleTrust, formatTrustHuman } from './trust.js';
 import { handleReport, formatReportHuman } from './report.js';
 import { handleOctagonChat } from './octagon-chat.js';
+import { computeCalibration, formatCalibrationHuman } from '../eval/calibration.js';
+import { generateMissingLessons, getRecentLessons } from '../eval/reflection.js';
+import { handleSlashCommand } from './index.js';
+import { syncSettlements } from '../tools/kalshi/settle.js';
+import { getDb } from '../db/index.js';
 import { handleSeries, formatSeriesHuman } from './series.js';
 import { handleEditorialThemes, formatEditorialThemesHuman } from './editorial-themes.js';
 import { handleCatalysts, formatCatalystsHuman } from './catalysts.js';
@@ -503,6 +508,45 @@ export async function dispatch(args: ParsedArgs): Promise<void> {
     }
 
     // ─── report (full Octagon markdown report) ─────────────────────────
+    // ─── hypothesis (falsifiable-claim registry) ──────────────────────
+    if (resolved.canonical === 'hypothesis') {
+      // Reuse the slash handler for identical semantics across surfaces.
+      const res = await handleSlashCommand(['/hypothesis', ...args.positionalArgs].join(' '));
+      console.log(res?.output ?? 'hypothesis: no output');
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
+    // ─── reflect (generate lessons from settled positions) ────────────
+    if (resolved.canonical === 'reflect') {
+      const db = getDb();
+      await syncSettlements(db).catch(() => { /* offline */ });
+      const result = await generateMissingLessons(db, {});
+      const recent = getRecentLessons(db, 10);
+      if (json) {
+        console.log(JSON.stringify(wrapSuccess('reflect', { ...result, lessons: recent })));
+      } else {
+        console.log(result.generated > 0 ? `Generated ${result.generated} lessons (${result.source}).` : 'No settled positions awaiting reflection.');
+        for (const l of recent) console.log(`  - [${l.settled_time.slice(0, 10)}] ${l.lesson}`);
+      }
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
+    // ─── calibration (realized-outcome Brier / skill report) ──────────
+    if (resolved.canonical === 'calibration') {
+      const db = getDb();
+      await syncSettlements(db).catch(() => { /* offline: render from local ledger */ });
+      const report = computeCalibration(db);
+      if (json) {
+        console.log(JSON.stringify(wrapSuccess('calibration', report)));
+      } else {
+        console.log(formatCalibrationHuman(report));
+      }
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
     // ─── octagon (conversational Prediction Markets Agent) ────────────
     if (resolved.canonical === 'octagon') {
       const res = handleOctagonChat(args.positionalArgs);
