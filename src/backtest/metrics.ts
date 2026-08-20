@@ -154,19 +154,25 @@ export function computeEquityRisk(edgeSignals: ScoredSignal[], totalCapital: num
   if (edgeSignals.length === 0 || totalCapital <= 0) {
     return { max_drawdown_pct: 0, risk_adjusted_return: 0 };
   }
-  const ordered = [...edgeSignals].sort((a, b) =>
-    String(a.close_time ?? '').localeCompare(String(b.close_time ?? '')),
-  );
+  // Aggregate P&L per close_time first: signals settling at the same moment
+  // have no defined order, and walking them individually would make the
+  // drawdown depend on input order.
+  const pnlByCloseTime = new Map<string, number>();
+  for (const sgl of edgeSignals) {
+    const key = String(sgl.close_time ?? '');
+    pnlByCloseTime.set(key, (pnlByCloseTime.get(key) ?? 0) + sgl.pnl);
+  }
+  const orderedTimes = [...pnlByCloseTime.keys()].sort((a, b) => a.localeCompare(b));
   let equity = 0;
   let peak = 0;
   let maxDdAbs = 0;
-  for (const sgl of ordered) {
-    equity += sgl.pnl;
+  for (const t of orderedTimes) {
+    equity += pnlByCloseTime.get(t)!;
     peak = Math.max(peak, equity);
     maxDdAbs = Math.max(maxDdAbs, peak - equity);
   }
   const maxDdPct = maxDdAbs / totalCapital;
-  const roi = ordered.reduce((sum, sgl) => sum + sgl.pnl, 0) / totalCapital;
+  const roi = edgeSignals.reduce((sum, sgl) => sum + sgl.pnl, 0) / totalCapital;
   const riskAdjusted = maxDdPct > 0 ? roi / maxDdPct : (roi > 0 ? Infinity : 0);
   return { max_drawdown_pct: maxDdPct, risk_adjusted_return: riskAdjusted };
 }

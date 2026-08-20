@@ -62,3 +62,32 @@ describe('buildV2Order', () => {
     expect(body.expiration_time).toBe(1234);
   });
 });
+
+// ─── Input validation (review round) ────────────────────────────────────────
+import { describe as dv, expect as ev, test as tv } from 'bun:test';
+import { v2BodyFromYesCents } from '../trading';
+
+dv('v2BodyFromYesCents validation', () => {
+  tv('limit order without yes_price is rejected, not silently market', () => {
+    ev(() => v2BodyFromYesCents({ ticker: 'KX-T', action: 'buy', side: 'yes', type: 'limit', count: 1 }))
+      .toThrow(/requires yes_price/);
+  });
+
+  tv('market order with expiration_ts is rejected (IOC cannot expire)', () => {
+    ev(() => v2BodyFromYesCents({ ticker: 'KX-T', action: 'buy', side: 'yes', type: 'market', count: 1, expiration_ts: 123 }))
+      .toThrow(/cannot take expiration_ts/);
+  });
+
+  tv('valid market order becomes IOC at worst price', () => {
+    const body = v2BodyFromYesCents({ ticker: 'KX-T', action: 'buy', side: 'yes', type: 'market', count: 2 });
+    ev(body.time_in_force).toBe('immediate_or_cancel');
+    ev(body.price).toBe('0.9900');
+    ev(body.count).toBe('2.00');
+  });
+
+  tv('valid limit NO order converts YES-cents onto the V2 YES book', () => {
+    const body = v2BodyFromYesCents({ ticker: 'KX-T', action: 'buy', side: 'no', type: 'limit', count: 1, yes_price: 30 });
+    ev(body.side).toBe('ask');   // buy NO = sell YES
+    ev(body.price).toBe('0.3000'); // yes_price is already YES-side
+  });
+});

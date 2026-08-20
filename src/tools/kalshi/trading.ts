@@ -8,8 +8,6 @@ import {
   buildV2Order,
   cancelOrderV2,
   placeOrderV2,
-  toV2Count,
-  toV2Side,
   type V2OrderBody,
 } from './orders-v2.js';
 
@@ -17,11 +15,7 @@ import {
 // prices are quoted from the YES side only, so `yes_price` inputs map to the
 // V2 dollar price directly and action/side pick bid (buy YES) or ask (sell YES).
 
-function yesCentsToV2Price(yesPrice: number): string {
-  return (yesPrice / 100).toFixed(4);
-}
-
-function v2BodyFromYesCents(o: {
+export function v2BodyFromYesCents(o: {
   ticker: string;
   action: 'buy' | 'sell';
   side: 'yes' | 'no';
@@ -31,20 +25,26 @@ function v2BodyFromYesCents(o: {
   expiration_ts?: number;
   client_order_id?: string;
 }): V2OrderBody {
-  const side = toV2Side(o.action, o.side);
-  const isMarket = o.type === 'market' || o.yes_price === undefined;
-  const body: V2OrderBody = {
+  if (o.type === 'limit' && o.yes_price === undefined) {
+    throw new Error(`Limit order on ${o.ticker} requires yes_price (1-99 cents). Use type "market" for an unpriced order.`);
+  }
+  if (o.type === 'market' && o.expiration_ts !== undefined) {
+    throw new Error(`Market order on ${o.ticker} cannot take expiration_ts — it executes as immediate-or-cancel.`);
+  }
+  // buildV2Order takes the price on the order's own side; the tool interface
+  // quotes YES-side cents, so express it on that side first.
+  const priceCents = o.type === 'market' || o.yes_price === undefined
+    ? undefined
+    : o.side === 'yes' ? o.yes_price : 100 - o.yes_price;
+  return buildV2Order({
     ticker: o.ticker,
-    side,
-    count: toV2Count(o.count),
-    // Market orders: immediate-or-cancel at the worst acceptable YES price.
-    price: isMarket ? (side === 'bid' ? '0.9900' : '0.0100') : yesCentsToV2Price(o.yes_price!),
-    time_in_force: isMarket ? 'immediate_or_cancel' : 'good_till_canceled',
-    self_trade_prevention_type: 'taker_at_cross',
-  };
-  if (o.client_order_id) body.client_order_id = o.client_order_id;
-  if (o.expiration_ts !== undefined) body.expiration_time = o.expiration_ts;
-  return body;
+    action: o.action,
+    side: o.side,
+    count: o.count,
+    priceCents,
+    clientOrderId: o.client_order_id,
+    expirationTs: o.expiration_ts,
+  });
 }
 
 export const placeOrder = new DynamicStructuredTool({

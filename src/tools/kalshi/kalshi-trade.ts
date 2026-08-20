@@ -30,7 +30,7 @@ Execute trading actions on Kalshi prediction markets. Routes natural language tr
 ## IMPORTANT
 
 - NEVER call this tool without explicit user confirmation of trade details
-- Always confirm: ticker, side (yes/no), action (buy/sell), count, and price
+- Always confirm: ticker, side (yes/no), action (buy/sell), count — and price for limit orders (market orders need no price)
 - Prices are in cents: $0.56 = 56 cents
 `.trim();
 

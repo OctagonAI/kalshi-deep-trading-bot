@@ -65,13 +65,21 @@ export function computeRealizedPnl(s: KalshiSettlement): number {
  */
 export function recordSettlement(db: Database, s: KalshiSettlement): boolean {
   const settledEpoch = Math.floor(new Date(s.settled_time).getTime() / 1000);
+  // "Entry view" means the model's belief when the position was OPENED. When
+  // a locally-tracked position exists, bound the edge lookup by its
+  // opened_at; otherwise fall back to the settlement time (edges recorded
+  // between entry and settlement would otherwise masquerade as entry views).
+  const localPosition = db
+    .prepare(`SELECT opened_at FROM positions WHERE ticker = ? AND opened_at IS NOT NULL ORDER BY opened_at ASC LIMIT 1`)
+    .get(s.ticker) as { opened_at: number } | undefined;
+  const entryBound = localPosition?.opened_at ?? settledEpoch;
   const entry = db
     .prepare(
       `SELECT model_prob, market_prob, edge FROM edge_history
        WHERE ticker = ? AND cache_miss = 0 AND timestamp <= ?
        ORDER BY timestamp DESC LIMIT 1`,
     )
-    .get(s.ticker, settledEpoch) as { model_prob: number; market_prob: number; edge: number } | undefined;
+    .get(s.ticker, entryBound) as { model_prob: number; market_prob: number; edge: number } | undefined;
 
   const result = db
     .prepare(
@@ -148,28 +156,21 @@ export interface SettlementSummary {
 }
 
 export function summarizeSettlements(db: Database): SettlementSummary {
-  const rows = getSettlements(db, 10_000);
-  const summary: SettlementSummary = {
-    count: rows.length,
-    total_realized_pnl: 0,
-    total_fees: 0,
-    wins: 0,
-    losses: 0,
-    with_model_view: 0,
-    model_side_wins: 0,
-  };
-  for (const r of rows) {
-    summary.total_realized_pnl += r.realized_pnl;
-    summary.total_fees += r.fee_cost;
-    if (r.realized_pnl > 0) summary.wins++;
-    else if (r.realized_pnl < 0) summary.losses++;
-    if (r.edge_entry !== null && r.edge_entry !== 0) {
-      summary.with_model_view++;
-      // Positive edge = model leaned YES; result 'yes' means the model side won.
-      const modelSaidYes = r.edge_entry > 0;
-      const yesWon = r.market_result.toLowerCase() === 'yes';
-      if (modelSaidYes === yesWon) summary.model_side_wins++;
-    }
-  }
-  return summary;
+  // SQL aggregation over the full table — no row cap.
+  const agg = db
+    .prepare(
+      `SELECT COUNT(*) AS count,
+              COALESCE(SUM(realized_pnl), 0) AS total_realized_pnl,
+              COALESCE(SUM(fee_cost), 0) AS total_fees,
+              COALESCE(SUM(realized_pnl > 0), 0) AS wins,
+              COALESCE(SUM(realized_pnl < 0), 0) AS losses,
+              COALESCE(SUM(edge_entry IS NOT NULL AND edge_entry != 0), 0) AS with_model_view,
+              COALESCE(SUM(
+                edge_entry IS NOT NULL AND edge_entry != 0
+                AND ((edge_entry > 0) = (LOWER(market_result) = 'yes'))
+              ), 0) AS model_side_wins
+       FROM settlements`,
+    )
+    .get() as SettlementSummary;
+  return agg;
 }

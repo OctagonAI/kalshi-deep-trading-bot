@@ -64,3 +64,17 @@ d3('alphaVsAlwaysNoPp', () => {
     e3(alphaVsAlwaysNoPp(s)).toBeCloseTo(-83.33, 1);
   });
 });
+
+d3('computeEquityRisk order independence', () => {
+  t3('same-close_time signals give identical drawdown in any input order', () => {
+    const mk = (pnl: number, close: string) => sig({ pnl, close_time: close });
+    // Two signals settle simultaneously at T2: one +0.5, one -0.5 (net 0).
+    const a = [mk(0.2, 'T1'), mk(0.5, 'T2'), mk(-0.5, 'T2'), mk(0.1, 'T3')];
+    const b = [mk(0.2, 'T1'), mk(-0.5, 'T2'), mk(0.5, 'T2'), mk(0.1, 'T3')];
+    const ra = computeEquityRisk(a, 2);
+    const rb = computeEquityRisk(b, 2);
+    e3(ra.max_drawdown_pct).toBe(rb.max_drawdown_pct);
+    // Netting at T2 means no interim dip at all.
+    e3(ra.max_drawdown_pct).toBe(0);
+  });
+});

@@ -92,17 +92,14 @@ export interface CommandResult {
  * Unterminated quotes fall back to whitespace splitting of the remainder.
  */
 export function tokenizeCommand(line: string): string[] {
+  // A token is a run of bare characters and/or quoted segments with no
+  // whitespace between them, so attached values like --theme="Bitcoin
+  // Breakout" stay one token. Unterminated quotes degrade to bare text.
   const tokens: string[] = [];
-  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  const re = /(?:[^\s"']+|"[^"]*"|'[^']*')+/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(line)) !== null) {
-    if (m[3] !== undefined && (m[3].includes('"') || m[3].includes("'"))) {
-      // Token glued to a quote (e.g. --theme"x" or an unterminated quote):
-      // strip quote chars rather than losing the token.
-      tokens.push(m[3].replace(/["']/g, ''));
-    } else {
-      tokens.push(m[1] ?? m[2] ?? m[3]!);
-    }
+    tokens.push(m[0].replace(/"([^"]*)"|'([^']*)'/g, (_all, dq, sq) => dq ?? sq ?? ''));
   }
   return tokens;
 }
@@ -492,7 +489,7 @@ async function handlePortfolioSlash(subview?: string): Promise<CommandResult> {
       const lines: string[] = [];
       lines.push('**Settlements (realized P&L)**');
       lines.push('');
-      lines.push(`Synced: ${sync.new_settlements} new (${sync.fetched} fetched)${sync.positions_closed ? `, ${sync.positions_closed} local positions closed` : ''}`);
+      lines.push(`Synced: ${sync.new_settlements} new (${sync.fetched} fetched)${sync.positions_closed ? `, ${sync.positions_closed} local positions closed` : ''}${sync.complete ? '' : ' — INCOMPLETE: page cap hit, run again to continue'}`);
       lines.push(`Lifetime: ${summary.count} settlements · realized P&L ${summary.total_realized_pnl >= 0 ? '+' : ''}$${summary.total_realized_pnl.toFixed(2)} · fees $${summary.total_fees.toFixed(2)} · ${summary.wins}W/${summary.losses}L`);
       if (summary.with_model_view > 0) {
         lines.push(`Model-side outcome: ${summary.model_side_wins}/${summary.with_model_view} settlements went the model's way`);

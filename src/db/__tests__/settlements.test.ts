@@ -137,3 +137,41 @@ d5('categoryOf', () => {
     e5(categoryOf('', 'KXFED-26SEP-T3')).toBe('KXFED');
   });
 });
+
+// ─── Entry-time bounding via local position (review round) ─────────────────
+import { describe as d6, expect as e6, test as t6 } from 'bun:test';
+
+d6('recordSettlement entry bounding', () => {
+  t6('edge recorded after entry but before settlement is excluded when a position exists', () => {
+    const db = freshDb();
+    const openedAt = Math.floor(new Date('2026-07-20').getTime() / 1000);
+    db.prepare(
+      `INSERT INTO positions (position_id, ticker, event_ticker, direction, size, entry_price, status, opened_at)
+       VALUES ('p1', 'KXTEST-26-T50', 'KXTEST-26', 'no', 10, 0.6, 'open', ?)`,
+    ).run(openedAt);
+    // Pre-entry edge (the true entry view)
+    db.prepare(
+      `INSERT INTO edge_history (ticker, event_ticker, timestamp, model_prob, market_prob, edge, cache_hit, cache_miss)
+       VALUES ('KXTEST-26-T50', 'KXTEST-26', ?, 0.3, 0.6, -0.3, 0, 0)`,
+    ).run(openedAt - 3600);
+    // Post-entry, pre-settlement edge (hindsight — must be excluded)
+    db.prepare(
+      `INSERT INTO edge_history (ticker, event_ticker, timestamp, model_prob, market_prob, edge, cache_hit, cache_miss)
+       VALUES ('KXTEST-26-T50', 'KXTEST-26', ?, 0.05, 0.1, -0.05, 0, 0)`,
+    ).run(openedAt + 86_400);
+    recordSettlement(db, BASE); // settles 2026-08-01
+    const [row] = getSettlements(db);
+    e6(row.model_prob_entry).toBeCloseTo(0.3);
+  });
+
+  t6('without a local position the settlement-time bound still applies', () => {
+    const db = freshDb();
+    db.prepare(
+      `INSERT INTO edge_history (ticker, event_ticker, timestamp, model_prob, market_prob, edge, cache_hit, cache_miss)
+       VALUES ('KXTEST-26-T50', 'KXTEST-26', ?, 0.25, 0.5, -0.25, 0, 0)`,
+    ).run(Math.floor(new Date('2026-07-28').getTime() / 1000));
+    recordSettlement(db, BASE);
+    const [row] = getSettlements(db);
+    e6(row.model_prob_entry).toBeCloseTo(0.25);
+  });
+});

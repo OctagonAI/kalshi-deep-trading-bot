@@ -17,6 +17,8 @@ export interface SettleSyncResult {
   fetched: number;
   new_settlements: number;
   positions_closed: number;
+  /** False when the page cap was hit with more history remaining. */
+  complete: boolean;
 }
 
 export async function syncSettlements(db: Database): Promise<SettleSyncResult> {
@@ -24,8 +26,15 @@ export async function syncSettlements(db: Database): Promise<SettleSyncResult> {
   let fetched = 0;
   let added = 0;
   let closed = 0;
+  let complete = true;
 
-  for (let page = 0; page < MAX_PAGES; page++) {
+  for (let page = 0; ; page++) {
+    if (page >= MAX_PAGES) {
+      // Cap hit with a cursor still live: report the sync as incomplete
+      // rather than silently truncating history.
+      complete = false;
+      break;
+    }
     const res = (await callKalshiApi('GET', '/portfolio/settlements', {
       params: { limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) },
     })) as { settlements?: KalshiSettlement[]; cursor?: string };
@@ -34,11 +43,12 @@ export async function syncSettlements(db: Database): Promise<SettleSyncResult> {
     fetched += batch.length;
     let newInBatch = 0;
     for (const s of batch) {
-      if (recordSettlement(db, s)) {
-        newInBatch++;
-        closed += closeLocalPosition(db, s);
-        resolveHypothesesForSettlement(db, s.ticker, s.market_result, computeRealizedPnl(s));
-      }
+      // Position close-out and hypothesis resolution are idempotent and must
+      // run even for already-recorded settlements: a replay (fresh DB row
+      // from an earlier sync, position opened later) still needs closing.
+      closed += closeLocalPosition(db, s);
+      resolveHypothesesForSettlement(db, s.ticker, s.market_result, computeRealizedPnl(s));
+      if (recordSettlement(db, s)) newInBatch++;
     }
     added += newInBatch;
 
@@ -48,7 +58,7 @@ export async function syncSettlements(db: Database): Promise<SettleSyncResult> {
     if (!cursor || batch.length < PAGE_LIMIT || (batch.length > 0 && newInBatch === 0)) break;
   }
 
-  return { fetched, new_settlements: added, positions_closed: closed };
+  return { fetched, new_settlements: added, positions_closed: closed, complete };
 }
 
 /** Close a locally-tracked open position that just settled. */

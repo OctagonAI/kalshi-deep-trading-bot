@@ -286,8 +286,9 @@ ${p}octagon <question>            Ask anything: discovery, screening, reports
 ${p}octagon reset                 Start a new conversation
 
 Multi-turn: follow-ups like "which of those has the best expected return?"
-keep the conversation context. The agent accepts market URLs, tickers, and
-plain-English descriptions.
+keep the conversation context — persisted to ~/.kalshi-bot, so one-shot CLI
+invocations keep context across runs too. The agent accepts market URLs,
+tickers, and plain-English descriptions. Use ${p}octagon reset to start over.
 
 Examples:
   ${p}octagon Where does the model disagree most with market prices in Politics?

@@ -2,6 +2,7 @@ import { callKalshiApi, KalshiApiError } from '../tools/kalshi/api.js';
 import { logger } from '../utils/logger.js';
 import type { OctagonInvoker, OctagonVariant } from './types.js';
 import { fetchReportVersions, generateReportAndWait } from './octagon-reports-api.js';
+import { looksLikeTicker } from '../commands/similar.js';
 
 /**
  * Slugify a title for Kalshi website URL paths.
@@ -158,8 +159,9 @@ export async function callOctagon(input: string, variant: OctagonVariant): Promi
 
   // The conversational agent accepts URLs, tickers, and natural language —
   // pass free text through, but canonicalize bare market tickers to URLs.
-  const looksLikeTicker = /^[A-Za-z0-9._-]+$/.test(input.trim());
-  const marketUrl = input.startsWith('https://kalshi.com/') || !looksLikeTicker
+  // Uses the strict ticker shape (hyphenated, e.g. KXFED-26SEP-T3) so a
+  // single conversational word like "Explain" is never treated as a ticker.
+  const marketUrl = input.startsWith('https://kalshi.com/') || !looksLikeTicker(input.trim())
     ? input
     : await buildKalshiMarketUrl(input.trim());
 

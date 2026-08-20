@@ -550,9 +550,12 @@ export async function dispatch(args: ParsedArgs): Promise<void> {
     // ─── octagon (conversational Prediction Markets Agent) ────────────
     if (resolved.canonical === 'octagon') {
       const res = handleOctagonChat(args.positionalArgs);
-      if ('followUp' in res) {
+      const answer = 'followUp' in res ? await res.followUp() : null;
+      if (json) {
+        // Single JSON envelope; the interim status line is human-only.
+        console.log(JSON.stringify(wrapSuccess('octagon', { answer: answer ?? res.output })));
+      } else if (answer !== null) {
         console.log(res.output);
-        const answer = await res.followUp();
         console.log(answer);
       } else {
         console.log(res.output);

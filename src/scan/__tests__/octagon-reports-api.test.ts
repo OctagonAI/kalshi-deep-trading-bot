@@ -19,7 +19,7 @@ function json(status: number, body: unknown): Response {
 beforeEach(() => {
   calls = [];
   process.env.OCTAGON_API_KEY = 'test-key';
-  globalThis.fetch = (async (input: any, init?: RequestInit) => {
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     const url = String(input);
     calls.push({ url, method: init?.method ?? 'GET' });
     return responder(url, init);
@@ -175,4 +175,56 @@ d4('524 resilience', () => {
     };
     await e4(generateReportAndWait('KXTEST-26', { pollIntervalMs: 5, timeoutMs: 1_000 })).rejects.toThrow(/kalshi_market_not_open/);
   });
+});
+
+// ─── Recovery hardening (review round) ──────────────────────────────────────
+d4('recovery hardening', () => {
+  t4('ambiguous POST with FAILED baseline GET surfaces the POST error (no recovery)', async () => {
+    responder = (url, init) => {
+      if (init?.method === 'POST') return new Response('cf timeout', { status: 524 });
+      // baseline versions GET fails definitively
+      return json(401, { error: { code: 'no_subscription', message: 'no active subscription' } });
+    };
+    await e4(generateReportAndWait('KXTEST-26', { pollIntervalMs: 5, timeoutMs: 1_000 }))
+      .rejects.toThrow(/524/);
+  });
+
+  t4('unchanged latest run is never returned as fresh', async () => {
+    responder = (url, init) => {
+      if (init?.method === 'POST') return new Response('cf timeout', { status: 524 });
+      // baseline AND latest keep showing the same old run
+      return json(200, { event_ticker: 'KXTEST-26', venue: 'kalshi', requested_url: null, versions: [{ run_id: 'old-run' }], markdown_report: '# Old', run_id: 'old-run' });
+    };
+    await e4(generateReportAndWait('KXTEST-26', { pollIntervalMs: 5, timeoutMs: 300 }))
+      .rejects.toThrow(/no new version landed/);
+  });
+
+  t4('definitive 404 during recovery polling rethrows immediately', async () => {
+    let latestCalls = 0;
+    responder = (url, init) => {
+      if (init?.method === 'POST') return new Response('cf timeout', { status: 524 });
+      if (url.includes('version=latest')) {
+        latestCalls++;
+        return json(404, { error: { code: 'not_found', message: 'gone' } });
+      }
+      return json(200, { event_ticker: 'KXTEST-26', venue: 'kalshi', requested_url: null, versions: [{ run_id: 'old-run' }], markdown_report: null, run_id: null });
+    };
+    await e4(generateReportAndWait('KXTEST-26', { pollIntervalMs: 5, timeoutMs: 10_000 }))
+      .rejects.toThrow(/not_found/);
+    e4(latestCalls).toBe(1);
+  });
+
+  t4('bogus poll options fall back to defaults instead of breaking', async () => {
+    responder = (url, init) => {
+      if (init?.method === 'POST') return json(202, { run_id: 'run-ok', status: 'processing', event_ticker: 'KXTEST-26', venue: 'kalshi' });
+      if (url.includes('/status/')) return json(200, { run_id: 'run-ok', status: 'completed', venue: 'kalshi', event_ticker: 'KXTEST-26', requested_url: null });
+      if (url.includes('version=run-ok')) return json(200, { event_ticker: 'KXTEST-26', venue: 'kalshi', requested_url: null, versions: [{ run_id: 'run-ok' }], markdown_report: '# ok', run_id: 'run-ok' });
+      return json(200, { event_ticker: 'KXTEST-26', venue: 'kalshi', requested_url: null, versions: [], markdown_report: null, run_id: null });
+    };
+    // NaN/negative values sanitize to defaults (same helper guards both
+    // options): a -5 timeout would otherwise make the deadline permanently
+    // expired, and a NaN interval would mean setTimeout(NaN) firing forever.
+    const res = await generateReportAndWait('KXTEST-26', { pollIntervalMs: 5, timeoutMs: Number.NaN });
+    e4(res.markdown).toBe('# ok');
+  }, 15_000);
 });

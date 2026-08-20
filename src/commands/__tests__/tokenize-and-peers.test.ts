@@ -40,3 +40,23 @@ describe('formatPeersHuman with null cluster', () => {
     expect(text).toContain('not assigned');
   });
 });
+
+// ─── Attached quoted flag values (review round) ─────────────────────────────
+import { describe as dtk, expect as etk, test as ttk } from 'bun:test';
+import { tokenizeCommand as tok } from '../index';
+
+dtk('tokenizeCommand attached quotes', () => {
+  ttk('--flag="multi word" stays one token with the full value', () => {
+    etk(tok('basket build --theme="Bitcoin Breakout" --size 5')).toEqual([
+      'basket', 'build', '--theme=Bitcoin Breakout', '--size', '5',
+    ]);
+  });
+
+  ttk("single-quoted attached value also stays whole", () => {
+    etk(tok("show --name='Elon Musk / Tesla'")).toEqual(['show', '--name=Elon Musk / Tesla']);
+  });
+
+  ttk('mixed bare and quoted segments concatenate', () => {
+    etk(tok('pre"mid dle"post')).toEqual(['premid dlepost']);
+  });
+});

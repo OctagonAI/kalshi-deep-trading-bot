@@ -682,3 +682,50 @@ describe2('parseReport placeholder safety net', () => {
     expect2(report.marketProb).toBeCloseTo(0.61);
   });
 });
+
+// ─── Per-outcome selection from the Reports API envelope (review round) ─────
+describe2('outcome_probabilities selection', () => {
+  const client = new OC2(async () => '', getDb2(':memory:'), makeAudit());
+
+  test2('non-first outcome is selected from the envelope array field', () => {
+    const envelope = JSON.stringify({
+      event_ticker: 'KXFED-26SEP',
+      venue: 'kalshi',
+      versions: [{
+        run_id: 'r1',
+        event_ticker: 'KXFED-26SEP',
+        model_probability: 70, // event-level = first outcome — must NOT be used
+        market_probability: 65,
+        outcome_probabilities: [
+          { market_ticker: 'KXFED-26SEP-T1', model_probability: 70, market_probability: 65 },
+          { market_ticker: 'KXFED-26SEP-T2', model_probability: 20, market_probability: 25 },
+        ],
+      }],
+      markdown_report: '# body',
+      run_id: 'r1',
+    });
+    const report = client.parseReport(envelope, 'KXFED-26SEP-T2', 'KXFED-26SEP', 'cache');
+    expect2(report.modelProb).toBeCloseTo(0.2);
+    expect2(report.marketProb).toBeCloseTo(0.25);
+    expect2(report.cacheMiss).toBe(false);
+  });
+
+  test2('explicit per-outcome 50% counts as explicit, not a placeholder miss', () => {
+    const envelope = JSON.stringify({
+      event_ticker: 'KXFED-26SEP',
+      venue: 'kalshi',
+      versions: [{
+        run_id: 'r1',
+        event_ticker: 'KXFED-26SEP',
+        outcome_probabilities: [
+          { market_ticker: 'KXFED-26SEP-T2', model_probability: 50, market_probability: 40 },
+        ],
+      }],
+      markdown_report: '# body',
+      run_id: 'r1',
+    });
+    const report = client.parseReport(envelope, 'KXFED-26SEP-T2', 'KXFED-26SEP', 'cache');
+    expect2(report.modelProb).toBe(0.5);
+    expect2(report.cacheMiss).toBe(false);
+  });
+});

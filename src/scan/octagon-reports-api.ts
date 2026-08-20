@@ -198,8 +198,8 @@ export async function generateReportAndWait(
     onProgress?: (msg: string) => void;
   },
 ): Promise<{ markdown: string; runId: string; envelope: ReportVersionsResponse }> {
-  const pollInterval = opts?.pollIntervalMs ?? 30_000;
-  const timeoutMs = opts?.timeoutMs ?? 600_000;
+  const pollInterval = sanitizeMs(opts?.pollIntervalMs, 30_000);
+  const timeoutMs = sanitizeMs(opts?.timeoutMs, 600_000);
 
   // Snapshot the current latest run BEFORE triggering: if the POST fails
   // ambiguously (gateway 502/504/524 or a client-side timeout), the run has
@@ -207,19 +207,22 @@ export async function generateReportAndWait(
   // Knowing the pre-POST latest run_id lets us recover by watching for a
   // version we haven't seen instead of surfacing a false-negative error.
   let baselineRunId: string | null = null;
+  let baselineKnown = false;
   try {
     const before = await fetchReportVersions(eventTicker);
     baselineRunId = before.versions[0]?.run_id ?? null;
+    baselineKnown = true;
   } catch {
-    // Baseline is best-effort; recovery still works with null (any version
-    // newer than "nothing" counts).
+    // Baseline unknown: recovery must not run, because without knowing the
+    // pre-POST latest run we could hand back an unchanged cached report as
+    // if it were the fresh one.
   }
 
   let accepted: ReportGenerationAccepted;
   try {
     accepted = await triggerReportGeneration(eventTicker);
   } catch (err) {
-    if (!isAmbiguousGenerationFailure(err)) throw err;
+    if (!isAmbiguousGenerationFailure(err) || !baselineKnown) throw err;
     opts?.onProgress?.(
       `Generation POST failed ambiguously (${err instanceof Error ? err.message.slice(0, 80) : err}); ` +
       `watching ?version=latest for the run to land anyway...`,
@@ -230,7 +233,7 @@ export async function generateReportAndWait(
 
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    await new Promise((r) => setTimeout(r, pollInterval));
+    await sleepUntil(pollInterval, deadline);
     const status = await fetchReportRunStatus(accepted.run_id);
     if (status.status === 'completed') break;
     if (status.status === 'failed') {
@@ -250,6 +253,17 @@ export async function generateReportAndWait(
     throw new Error(`Report run ${accepted.run_id} completed but no markdown was returned for ${eventTicker}.`);
   }
   return { markdown: res.markdown_report, runId: accepted.run_id, envelope: res };
+}
+
+/** Positive finite ms value or the default. */
+function sanitizeMs(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/** Sleep `intervalMs`, but never past `deadline`. */
+async function sleepUntil(intervalMs: number, deadline: number): Promise<void> {
+  const delay = Math.max(0, Math.min(intervalMs, deadline - Date.now()));
+  if (delay > 0) await new Promise((r) => setTimeout(r, delay));
 }
 
 /**
@@ -275,12 +289,16 @@ async function recoverFromLatest(
 ): Promise<{ markdown: string; runId: string; envelope: ReportVersionsResponse }> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    await new Promise((r) => setTimeout(r, pollInterval));
+    await sleepUntil(pollInterval, deadline);
     let latest: ReportVersionsResponse | null = null;
     try {
       latest = await fetchReportVersions(eventTicker, { version: 'latest' });
-    } catch {
-      // transient — keep polling until the deadline
+    } catch (err) {
+      // Transient gateway/timeout failures keep polling; definitive API
+      // answers (401/403/404, malformed keys) will not improve with time.
+      if (err instanceof OctagonReportsApiError && !GET_RETRY_STATUS.includes(err.statusCode)) {
+        throw err;
+      }
     }
     const newRun = latest?.versions[0]?.run_id;
     if (latest?.markdown_report && newRun && newRun !== baselineRunId) {
