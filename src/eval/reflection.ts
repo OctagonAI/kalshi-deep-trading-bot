@@ -51,6 +51,7 @@ export function getPendingReflections(db: Database, limit = 10): PendingSettleme
                 ORDER BY e.timestamp DESC LIMIT 1) AS drivers_json
        FROM settlements s
        WHERE s.model_prob_entry IS NOT NULL
+         AND LOWER(s.market_result) IN ('yes', 'no')
          AND NOT EXISTS (
            SELECT 1 FROM lessons l
             WHERE l.ticker = s.ticker AND l.settled_time = s.settled_time
@@ -105,6 +106,7 @@ export async function generateMissingLessons(
 
   let llmCount = 0;
   let fallbackCount = 0;
+  let inserted = 0;
   const insert = db.prepare(
     `INSERT OR IGNORE INTO lessons (
        ticker, event_ticker, category, settled_time, model_prob, market_prob,
@@ -131,7 +133,7 @@ export async function generateMissingLessons(
       lesson = fallbackLesson(s);
       fallbackCount++;
     }
-    insert.run(
+    const res = insert.run(
       s.ticker,
       s.event_ticker,
       categoryOf(s.event_ticker, s.ticker),
@@ -144,11 +146,12 @@ export async function generateMissingLessons(
       source,
       Math.floor(Date.now() / 1000),
     );
+    inserted += res.changes;
   }
 
   const source: ReflectResult['source'] =
     llmCount > 0 && fallbackCount > 0 ? 'mixed' : llmCount > 0 ? 'llm' : 'fallback';
-  return { generated: pending.length, source };
+  return { generated: inserted, source };
 }
 
 /** Lessons for a category, newest first — the injection read path. */

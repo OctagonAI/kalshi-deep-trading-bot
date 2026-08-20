@@ -34,7 +34,7 @@ export function addHypothesis(
     source?: string;
   },
 ): number {
-  const category = h.eventTicker || h.ticker ? categoryOf(h.eventTicker ?? '', h.ticker ?? '') : '';
+  const category = h.eventTicker || h.ticker ? categoryOf(h.eventTicker ?? '', h.ticker ?? '') : 'unknown';
   const result = db
     .prepare(
       `INSERT INTO hypotheses (claim, category, ticker, event_ticker, predicted_side, source, created_at)
@@ -78,6 +78,9 @@ export function resolveHypothesesForSettlement(
   realizedPnl: number,
 ): number {
   const won = marketResult.toLowerCase();
+  // Only binary outcomes can confirm/refute a yes/no prediction. Voided,
+  // scalar, or empty results leave hypotheses open for manual review.
+  if (won !== 'yes' && won !== 'no') return 0;
   const open = db
     .prepare(`SELECT id, predicted_side FROM hypotheses WHERE ticker = ? AND status = 'open' AND predicted_side IS NOT NULL`)
     .all(ticker) as Array<{ id: number; predicted_side: 'yes' | 'no' }>;

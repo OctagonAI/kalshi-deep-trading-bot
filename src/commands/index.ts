@@ -55,7 +55,7 @@ import { callLlm, getFastModel, DEFAULT_MODEL } from '../model/llm.js';
 import { resolveProvider } from '../providers.js';
 
 /** Fast-model wrapper for reflection; null when no provider key is configured. */
-function makeReflectionLlm(): ((prompt: string) => Promise<string>) | undefined {
+export function makeReflectionLlm(): ((prompt: string) => Promise<string>) | undefined {
   try {
     const provider = resolveProvider(DEFAULT_MODEL);
     const model = getFastModel(provider.id, DEFAULT_MODEL);
@@ -190,15 +190,18 @@ export async function handleSlashCommand(input: string): Promise<CommandResult |
       const db = getDb();
       const sub = args[0]?.toLowerCase();
       if (sub === 'add') {
-        const flagIdx = args.findIndex((a) => a.startsWith('--'));
-        const claim = (flagIdx === -1 ? args.slice(1) : args.slice(1, flagIdx)).join(' ').trim();
-        if (!claim) return { output: 'Usage: /hypothesis add "claim" [--ticker KX... --side yes|no]' };
+        // Flags may come before or after the claim; anything that isn't a
+        // recognized flag (or its value) is claim text.
         let ticker: string | undefined;
         let side: 'yes' | 'no' | undefined;
+        const claimParts: string[] = [];
         for (let i = 1; i < args.length; i++) {
           if (args[i] === '--ticker') ticker = args[++i]?.toUpperCase();
           else if (args[i] === '--side') { const v = args[++i]?.toLowerCase(); if (v === 'yes' || v === 'no') side = v; }
+          else claimParts.push(args[i]);
         }
+        const claim = claimParts.join(' ').trim();
+        if (!claim) return { output: 'Usage: /hypothesis add "claim" [--ticker KX... --side yes|no]' };
         const id = addHypothesis(db, { claim, ticker, predictedSide: side });
         return { output: `Hypothesis #${id} registered${ticker ? ` (auto-resolves when ${ticker} settles)` : ''}.` };
       }
@@ -222,11 +225,11 @@ export async function handleSlashCommand(input: string): Promise<CommandResult |
 
     // ─── /reflect (generate lessons from settled positions) ─────────
     case 'reflect': {
-      const db = getDb();
-      await syncSettlements(db).catch(() => { /* offline: use local ledger */ });
       return {
         output: 'Reflecting on settled positions...',
         asyncFollowUp: async () => {
+          const db = getDb();
+          await syncSettlements(db).catch(() => { /* offline: use local ledger */ });
           const result = await generateMissingLessons(db, { llm: makeReflectionLlm() });
           const recent = getRecentLessons(db, 10);
           const lines: string[] = [];
@@ -245,9 +248,14 @@ export async function handleSlashCommand(input: string): Promise<CommandResult |
 
     // ─── /calibration (realized-outcome Brier / skill report) ───────
     case 'calibration': {
-      const db = getDb();
-      await syncSettlements(db).catch(() => { /* offline: render from local ledger */ });
-      return { output: formatCalibrationHuman(computeCalibration(db)) };
+      return {
+        output: 'Computing calibration from settled positions...',
+        asyncFollowUp: async () => {
+          const db = getDb();
+          await syncSettlements(db).catch(() => { /* offline: render from local ledger */ });
+          return formatCalibrationHuman(computeCalibration(db));
+        },
+      };
     }
 
     // ─── /octagon (conversational Prediction Markets Agent) ─────────

@@ -47,3 +47,22 @@ describe('hypothesis registry', () => {
     expect(listHypotheses(db)[0].category).toBe('KXFED');
   });
 });
+
+// ─── Non-binary results & claim-after-flags (review round) ──────────────────
+import { describe as d7, expect as e7, test as t7 } from 'bun:test';
+
+d7('non-binary settlement results', () => {
+  t7('void/scalar results leave market-bound hypotheses open', () => {
+    const db = freshDb();
+    const id = addHypothesis(db, { claim: 'x', ticker: 'KXV-1-T', predictedSide: 'yes' });
+    e7(resolveHypothesesForSettlement(db, 'KXV-1-T', 'void', 0)).toBe(0);
+    e7(resolveHypothesesForSettlement(db, 'KXV-1-T', '', 0)).toBe(0);
+    e7(listHypotheses(db).find((h) => h.id === id)!.status).toBe('open');
+  });
+
+  t7('unbound claims store category "unknown"', () => {
+    const db = freshDb();
+    addHypothesis(db, { claim: 'thematic claim' });
+    e7(listHypotheses(db)[0].category).toBe('unknown');
+  });
+});

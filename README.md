@@ -145,6 +145,17 @@ Type help for commands, or just ask a question.
 | `calibration` | Brier scores and per-category skill vs the market, from realized settlements (reliability buckets included) |
 | `reflect` | Reflection loop — turns each settled position into a terse lesson, re-surfaced inside `analyze` for the same series |
 | `hypothesis` | Falsifiable-claim registry — executed trades auto-file claims, settlements auto-resolve them; add thematic claims manually |
+
+Learning-loop examples:
+
+```bash
+kalshi calibration                       # Brier/skill per category from settled positions
+kalshi reflect                           # turn unsettled→settled outcomes into terse lessons
+kalshi hypothesis add "Fed cuts twice before December"
+kalshi hypothesis add "AOC nomination overpriced" --ticker KXPRESNOMD-28-AOC --side no
+kalshi hypothesis list open              # scoreboard + open claims
+kalshi hypothesis resolve 3 refuted "only one cut happened"
+```
 | `themes` (registry) | Editorial narrative buckets — list/show/import/create/delete/add-series |
 | `themes report` | 25-theme dashboard with SEO + liquidity |
 | `themes audit` | Flag dead themes (high SEO + zero volume) |

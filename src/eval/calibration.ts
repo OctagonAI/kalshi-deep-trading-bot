@@ -61,35 +61,44 @@ export function computeCalibration(db: Database): CalibrationReport {
     )
     .all() as Array<ScoredSettlement & { model_prob_entry: number | null }>;
 
-  const scored = rows.filter((r): r is ScoredSettlement => r.model_prob_entry !== null);
+  // Only binary outcomes are scoreable: voided/scalar/empty results have no
+  // 0/1 truth to compare against. They count as unscored, like rows without
+  // a model view.
+  const isBinary = (r: { market_result: string }) => {
+    const v = r.market_result.toLowerCase();
+    return v === 'yes' || v === 'no';
+  };
+  const scored = rows.filter((r): r is ScoredSettlement => r.model_prob_entry !== null && isBinary(r));
   const unscored = rows.length - scored.length;
 
+  // The headline Brier comparison and skill are computed over the PAIRED
+  // population — rows carrying both a model and a market probability — so
+  // the two averages describe the same settlements.
   let brierModelSum = 0;
   let brierMarketSum = 0;
-  let marketN = 0;
-  const byCategory = new Map<string, { n: number; bm: number; bmkt: number; mktN: number; pnl: number }>();
+  let pairedN = 0;
+  const byCategory = new Map<string, { n: number; bmPaired: number; bmkt: number; pairedN: number; pnl: number }>();
   const bucketDefs = Array.from({ length: 10 }, (_, i) => ({ lo: i / 10, hi: (i + 1) / 10 }));
   const buckets = bucketDefs.map(() => ({ n: 0, predictedSum: 0, yes: 0 }));
 
   for (const r of scored) {
     const outcome = r.market_result.toLowerCase() === 'yes' ? 1 : 0;
     const bm = (r.model_prob_entry - outcome) ** 2;
-    brierModelSum += bm;
-
-    let bmkt = 0;
-    const hasMarket = r.market_prob_entry !== null;
-    if (hasMarket) {
-      bmkt = (r.market_prob_entry! - outcome) ** 2;
-      brierMarketSum += bmkt;
-      marketN++;
-    }
 
     const cat = categoryOf(r.event_ticker, r.ticker);
-    const c = byCategory.get(cat) ?? { n: 0, bm: 0, bmkt: 0, mktN: 0, pnl: 0 };
+    const c = byCategory.get(cat) ?? { n: 0, bmPaired: 0, bmkt: 0, pairedN: 0, pnl: 0 };
     c.n++;
-    c.bm += bm;
-    if (hasMarket) { c.bmkt += bmkt; c.mktN++; }
     c.pnl += r.realized_pnl;
+
+    if (r.market_prob_entry !== null) {
+      const bmkt = (r.market_prob_entry - outcome) ** 2;
+      brierModelSum += bm;
+      brierMarketSum += bmkt;
+      pairedN++;
+      c.bmPaired += bm;
+      c.bmkt += bmkt;
+      c.pairedN++;
+    }
     byCategory.set(cat, c);
 
     const idx = Math.min(9, Math.floor(r.model_prob_entry * 10));
@@ -98,8 +107,8 @@ export function computeCalibration(db: Database): CalibrationReport {
     buckets[idx].yes += outcome;
   }
 
-  const brierModel = scored.length > 0 ? brierModelSum / scored.length : 0;
-  const brierMarket = marketN > 0 ? brierMarketSum / marketN : 0;
+  const brierModel = pairedN > 0 ? brierModelSum / pairedN : 0;
+  const brierMarket = pairedN > 0 ? brierMarketSum / pairedN : 0;
 
   return {
     n_scored: scored.length,
@@ -111,9 +120,9 @@ export function computeCalibration(db: Database): CalibrationReport {
       .map(([category, c]) => ({
         category,
         n: c.n,
-        brier_model: c.n > 0 ? c.bm / c.n : 0,
-        brier_market: c.mktN > 0 ? c.bmkt / c.mktN : 0,
-        skill: c.mktN > 0 && c.bmkt > 0 ? 1 - (c.bm / c.n) / (c.bmkt / c.mktN) : 0,
+        brier_model: c.pairedN > 0 ? c.bmPaired / c.pairedN : 0,
+        brier_market: c.pairedN > 0 ? c.bmkt / c.pairedN : 0,
+        skill: c.pairedN > 0 && c.bmkt > 0 ? 1 - c.bmPaired / c.bmkt : 0,
         realized_pnl: c.pnl,
       }))
       .sort((a, b) => b.n - a.n),

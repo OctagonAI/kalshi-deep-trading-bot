@@ -175,3 +175,39 @@ d6('recordSettlement entry bounding', () => {
     e6(row.model_prob_entry).toBeCloseTo(0.25);
   });
 });
+
+// ─── Non-binary results excluded from calibration (review round) ────────────
+import { describe as d8, expect as e8, test as t8 } from 'bun:test';
+
+d8('calibration excludes non-binary results', () => {
+  t8('voided settlements count as unscored', () => {
+    const db = freshDb();
+    db.prepare(
+      `INSERT INTO settlements (ticker, event_ticker, market_result, revenue, realized_pnl, settled_time, model_prob_entry, market_prob_entry, edge_entry, synced_at)
+       VALUES ('KXV-1-T', 'KXV-1', 'void', 0, 0, '2026-08-05T00:00:00Z', 0.7, 0.6, 0.1, 0)`,
+    ).run();
+    const r = computeCalibration(db);
+    e8(r.n_scored).toBe(0);
+    e8(r.n_unscored).toBe(1);
+  });
+
+  t8('headline Brier uses only the paired population', () => {
+    const db = freshDb();
+    // Paired row: model 0.9/market 0.6, outcome yes → bm 0.01, bmkt 0.16
+    db.prepare(
+      `INSERT INTO settlements (ticker, event_ticker, market_result, revenue, realized_pnl, settled_time, model_prob_entry, market_prob_entry, edge_entry, synced_at)
+       VALUES ('KXP-1-T1', 'KXP-1', 'yes', 1, 1, '2026-08-06T00:00:00Z', 0.9, 0.6, 0.3, 0)`,
+    ).run();
+    // Model-only row (market NULL): a terrible model miss that must NOT
+    // contaminate the paired comparison.
+    db.prepare(
+      `INSERT INTO settlements (ticker, event_ticker, market_result, revenue, realized_pnl, settled_time, model_prob_entry, market_prob_entry, edge_entry, synced_at)
+       VALUES ('KXP-1-T2', 'KXP-1', 'no', 0, -1, '2026-08-07T00:00:00Z', 0.99, NULL, NULL, 0)`,
+    ).run();
+    const r = computeCalibration(db);
+    e8(r.n_scored).toBe(2);
+    e8(r.brier_model).toBeCloseTo(0.01);
+    e8(r.brier_market).toBeCloseTo(0.16);
+    e8(r.skill).toBeGreaterThan(0.9);
+  });
+});

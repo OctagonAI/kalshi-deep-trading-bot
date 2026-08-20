@@ -9,8 +9,19 @@ function freshDb() {
   return db;
 }
 
-function seedSettlement(db: Database, over: Record<string, unknown> = {}) {
-  const row = {
+interface SeedRow {
+  ticker: string;
+  event_ticker: string;
+  market_result: string;
+  realized_pnl: number;
+  settled_time: string;
+  model_prob_entry: number | null;
+  market_prob_entry: number | null;
+  edge_entry: number | null;
+}
+
+function seedSettlement(db: Database, over: Partial<SeedRow> = {}) {
+  const row: SeedRow = {
     ticker: 'KXFED-26SEP-T1', event_ticker: 'KXFED-26SEP', market_result: 'no',
     realized_pnl: -4.2, settled_time: '2026-08-10T00:00:00Z',
     model_prob_entry: 0.8, market_prob_entry: 0.6, edge_entry: 0.2,
@@ -18,8 +29,8 @@ function seedSettlement(db: Database, over: Record<string, unknown> = {}) {
   };
   db.prepare(
     `INSERT INTO settlements (ticker, event_ticker, market_result, revenue, realized_pnl, settled_time, model_prob_entry, market_prob_entry, edge_entry, synced_at)
-     VALUES ($ticker, $event_ticker, $market_result, 0, $realized_pnl, $settled_time, $model_prob_entry, $market_prob_entry, $edge_entry, 0)`,
-  ).run(Object.fromEntries(Object.entries(row).map(([k, v]) => ['$' + k, v])) as any);
+     VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, 0)`,
+  ).run(row.ticker, row.event_ticker, row.market_result, row.realized_pnl, row.settled_time, row.model_prob_entry, row.market_prob_entry, row.edge_entry);
 }
 
 describe('reflection loop', () => {
