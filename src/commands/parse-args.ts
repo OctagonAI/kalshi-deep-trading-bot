@@ -23,6 +23,10 @@ const SUBCOMMANDS = [
   'reflect',
   // Falsifiable-claim registry
   'hypothesis',
+  // Hard caps + instant halt
+  'mandate', 'kill', 'resume',
+  // Forward-test ledger
+  'paper',
 ] as const;
 
 export type Subcommand = (typeof SUBCOMMANDS)[number];

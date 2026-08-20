@@ -51,6 +51,23 @@ import { computeCalibration, formatCalibrationHuman } from '../eval/calibration.
 import { categoryOf } from '../eval/calibration.js';
 import { generateMissingLessons, getLessonsForCategory, getRecentLessons, formatLessonsForContext } from '../eval/reflection.js';
 import { addHypothesis, resolveHypothesis, listHypotheses, scoreboard, formatHypothesesHuman, type HypothesisStatus } from '../db/hypotheses.js';
+import { getMandateStatus, formatMandateHuman, activateKillSwitch, deactivateKillSwitch, MandateViolation } from '../risk/mandate.js';
+import { needsBearCheck, runBearCheck, formatBearCheck, type BearCheckLlm } from '../eval/bear-check.js';
+import { openPaperPosition, settlePaperPositions, listPaperPositions, paperSummary, formatPaperHuman } from './paper.js';
+
+/** Fast-model structured-output wrapper for the bear check. */
+function makeBearCheckLlm(): BearCheckLlm | undefined {
+  try {
+    const provider = resolveProvider(DEFAULT_MODEL);
+    const model = getFastModel(provider.id, DEFAULT_MODEL);
+    return async (prompt, schema) => {
+      const res = await callLlm(prompt, { model, outputSchema: schema });
+      return typeof res.response === 'string' ? JSON.parse(res.response) : res.response;
+    };
+  } catch {
+    return undefined;
+  }
+}
 import { callLlm, getFastModel, DEFAULT_MODEL } from '../model/llm.js';
 import { resolveProvider } from '../providers.js';
 
@@ -182,6 +199,52 @@ export async function handleSlashCommand(input: string): Promise<CommandResult |
           return resp.ok ? formatEditorialThemesHuman(resp.data) : (resp.error?.message ?? 'themes failed');
         },
       };
+    }
+
+    // ─── /paper (forward-test ledger — no exchange orders) ──────────
+    case 'paper': {
+      const db = getDb();
+      const sub = args[0]?.toLowerCase();
+      if (sub === 'buy' || sub === 'sell') {
+        // Same argument shape as /buy: <ticker> <count> [price] [yes|no]
+        const [ticker, countStr, ...rest] = args.slice(1);
+        if (!ticker || !countStr) {
+          return { output: `Usage: /paper ${sub} <ticker> <count> [price_in_cents] [yes|no]` };
+        }
+        const side = parseSide(rest.find((r) => parseSide(r) !== null)) ?? 'yes';
+        const priceStr = rest.find((r) => /^\d+$/.test(r));
+        const validation = validateTradeArgs(countStr, priceStr);
+        if ('error' in validation) return { output: validation.error };
+        let entry = validation.price;
+        if (entry === undefined) {
+          const quote = await fetchMarketQuote(ticker.toUpperCase(), sub, side);
+          if ('error' in quote) return { output: quote.error };
+          entry = quote.cents;
+        }
+        const id = openPaperPosition(db, { ticker: ticker.toUpperCase(), action: sub, side, count: validation.count, priceCents: entry });
+        return { output: `Paper position #${id}: ${sub.toUpperCase()} ${side.toUpperCase()} x${validation.count} ${ticker.toUpperCase()} @ ${entry}¢ (no exchange order). Settles automatically when the market resolves.` };
+      }
+      // default: settle pass + view
+      return {
+        output: 'Checking open paper positions for settlements...',
+        asyncFollowUp: async () => {
+          const settled = await settlePaperPositions(db).catch(() => 0);
+          return formatPaperHuman(listPaperPositions(db), paperSummary(db), settled);
+        },
+      };
+    }
+
+    // ─── /mandate /kill /resume (hard caps + instant halt) ──────────
+    case 'mandate':
+      return { output: formatMandateHuman(getMandateStatus()) };
+    case 'kill': {
+      const reason = args.join(' ').trim() || undefined;
+      activateKillSwitch(reason);
+      return { output: `⛔ Kill switch ACTIVE${reason ? ` — ${reason}` : ''}. All new orders will be refused. /resume to lift.` };
+    }
+    case 'resume': {
+      deactivateKillSwitch();
+      return { output: '✓ Kill switch lifted — trading enabled (mandate caps still apply).' };
     }
 
     // ─── /hypothesis (falsifiable-claim registry) ───────────────────
@@ -444,7 +507,9 @@ export async function executePendingTrade(trade: NonNullable<CommandResult['pend
   }
   // effectivePrice is quoted on the chosen side; buildV2Order maps it onto
   // the V2 YES-side book (buy NO at p → sell YES at 1 - p).
-  const data = await placeOrderV2(
+  let data;
+  try {
+    data = await placeOrderV2(
     buildV2Order({
       ticker: trade.ticker,
       action: trade.action,
@@ -452,7 +517,14 @@ export async function executePendingTrade(trade: NonNullable<CommandResult['pend
       count: trade.count,
       priceCents: effectivePrice,
     })
-  );
+    );
+  } catch (err) {
+    if (err instanceof MandateViolation) {
+      trackEvent('trade_blocked', { action: trade.action, side: trade.side, reason: 'mandate' });
+      return `⛔ ${err.message}`;
+    }
+    throw err;
+  }
   trackEvent('trade_executed', { action: trade.action, side: trade.side, success: 'true' });
   // Auto-file a falsifiable hypothesis for the position: the side that
   // profits is the predicted settlement. Settlement sync resolves it.
@@ -543,7 +615,19 @@ async function handlePortfolioSlash(subview?: string): Promise<CommandResult> {
 
 async function handleAnalyzeCommand(args: string[]): Promise<CommandResult> {
   const ticker = args[0];
-  if (!ticker) return { output: 'Usage: /analyze <ticker> [refresh]' };
+  if (!ticker) return { output: 'Usage: /analyze <ticker> [refresh]  |  /analyze <t1> <t2> [t3...]' };
+  // Multiple tickers → batch edge readout (one Octagon call for all).
+  const nonFlag = args.filter((a) => !a.startsWith('--') && a.toLowerCase() !== 'refresh');
+  if (nonFlag.length > 1) {
+    return {
+      output: `Batch-analyzing ${nonFlag.length} tickers...`,
+      asyncFollowUp: async () => {
+        const { handleAnalyzeBatch, formatAnalyzeBatchHuman } = await import('./analyze-batch.js');
+        const resp = await handleAnalyzeBatch(nonFlag.map((t) => t.toUpperCase()));
+        return resp.ok ? formatAnalyzeBatchHuman(resp.data) : (resp.error?.message ?? 'analyze (batch) failed');
+      },
+    };
+  }
   const refresh = args[1]?.toLowerCase() === 'refresh';
   try {
     const data = await handleAnalyze(ticker.toUpperCase(), refresh);
@@ -551,11 +635,34 @@ async function handleAnalyzeCommand(args: string[]): Promise<CommandResult> {
     // Reflection loop: surface lessons from settled positions in the same
     // series next to the fresh analysis, so realized errors inform the
     // next decision instead of being forgotten.
+    let lessonTexts: string[] = [];
     try {
       const lessons = getLessonsForCategory(getDb(), categoryOf(data.eventTicker ?? '', ticker.toUpperCase()));
+      lessonTexts = lessons.map((l) => l.lesson);
       const block = formatLessonsForContext(lessons);
       if (block) output += `\n\n${block}`;
     } catch { /* lessons are additive — never break analyze */ }
+
+    // Adversarial bear-check: extreme edges get a skeptic pass appended.
+    const edgePp = data.edge !== null && data.modelProb !== null ? data.edge * 100 : null;
+    if (edgePp !== null && needsBearCheck(edgePp)) {
+      return {
+        output,
+        asyncFollowUp: async () => {
+          const llm = makeBearCheckLlm();
+          const result = await runBearCheck({
+            ticker: data.ticker,
+            title: data.title,
+            modelProb: data.modelProb!,
+            marketProb: data.marketProb ?? 0.5,
+            edgePp,
+            keyDrivers: (data.drivers ?? []).slice(0, 5).map((d: { claim: string }) => d.claim),
+            lessons: lessonTexts,
+          }, llm);
+          return formatBearCheck(result, edgePp);
+        },
+      };
+    }
     return { output };
   } catch (err) {
     return { output: `Analyze failed: ${err instanceof Error ? err.message : String(err)}` };

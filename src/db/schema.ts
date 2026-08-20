@@ -151,6 +151,32 @@ export function migrate(db: Database): void {
       PRIMARY KEY (ticker, settled_time)
     );
 
+    CREATE TABLE IF NOT EXISTS paper_positions (
+      -- Forward-test ledger: same entry semantics as live /buy, no exchange
+      -- order. Settled against real market results, scored with the same
+      -- flat-bet definitions as the backtest so paper vs live vs backtest
+      -- numbers are directly comparable.
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticker        TEXT NOT NULL,
+      event_ticker  TEXT NOT NULL DEFAULT '',
+      action        TEXT NOT NULL CHECK (action IN ('buy', 'sell')),
+      side          TEXT NOT NULL CHECK (side IN ('yes', 'no')),
+      count         REAL NOT NULL,
+      entry_price   REAL NOT NULL,          -- cents, on the chosen side
+      model_prob    REAL,                   -- model view at entry, 0-1
+      market_prob   REAL,
+      edge          REAL,
+      status        TEXT NOT NULL DEFAULT 'open'
+                    CHECK (status IN ('open', 'settled', 'closed')),
+      outcome       TEXT,                   -- 'yes' | 'no' when settled
+      realized_pnl  REAL,
+      opened_at     INTEGER NOT NULL,
+      settled_at    INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_paper_status
+      ON paper_positions(status, opened_at DESC);
+
     CREATE TABLE IF NOT EXISTS hypotheses (
       -- Falsifiable-claim registry (Vibe-Trading pattern). Market-bound
       -- hypotheses (ticker + predicted_side) are auto-resolved by

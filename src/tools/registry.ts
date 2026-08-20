@@ -1,4 +1,6 @@
 import { StructuredToolInterface } from '@langchain/core/tools';
+import { getFastModel } from '../model/llm.js';
+import { resolveProvider } from '../providers.js';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { createKalshiSearch, KALSHI_SEARCH_DESCRIPTION } from './kalshi/kalshi-search.js';
@@ -66,15 +68,21 @@ Check whether the Kalshi exchange is currently active and trading is enabled.
  * @returns Array of registered tools
  */
 export function getToolRegistry(model: string): RegisteredTool[] {
+  // Dual-model routing: the search and trade sub-agents do mechanical
+  // routing (natural language → one structured API/tool call), so they run
+  // on the provider's fast variant. The main chat agent — where judgment
+  // lives — keeps the session model. getFastModel falls back to `model`
+  // for providers without a fast tier (e.g. Ollama).
+  const routerModel = getFastModel(resolveProvider(model).id, model);
   const tools: RegisteredTool[] = [
     {
       name: 'kalshi_search',
-      tool: createKalshiSearch(model),
+      tool: createKalshiSearch(routerModel),
       description: KALSHI_SEARCH_DESCRIPTION,
     },
     {
       name: 'kalshi_trade',
-      tool: createKalshiTrade(model),
+      tool: createKalshiTrade(routerModel),
       description: KALSHI_TRADE_DESCRIPTION,
     },
     {

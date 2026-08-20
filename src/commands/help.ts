@@ -250,6 +250,29 @@ Flags:
 
 Output ranks pairs ascending by correlation — most-uncorrelated first.`,
 
+    paper: `**${p}paper** — Paper-trading ledger (forward test, no exchange orders)
+
+${p}paper                         Ledger view; settles resolved positions first
+${p}paper buy <ticker> <n> [price] [yes|no]
+${p}paper sell <ticker> <n> [price] [yes|no]
+
+Entries use the same semantics as ${p}buy (market quote when no price) and
+capture the model's view at entry. Positions settle against real Kalshi
+results and are scored with the backtest's flat-bet definitions, so
+backtest → paper → live is one comparable chain. Paper entries auto-file
+hypotheses (source 'paper').`,
+
+    mandate: `**${p}mandate** — Hard trading caps + kill switch
+
+${p}mandate                       Show caps and kill-switch status
+${p}kill [reason]                 INSTANT HALT — refuse all new orders
+${p}resume                        Lift the kill switch
+
+Caps (per-order contracts, per-order notional, daily realized loss from the
+settlements ledger) are enforced at order placement itself, so every path —
+manual ${p}buy, the trading agent, batch orders — obeys them. Cancels are
+always allowed. Adjust: ${p}config set mandate.max_notional_per_order 250`,
+
     hypothesis: `**${p}hypothesis** — Falsifiable-claim registry with lifecycle
 
 ${p}hypothesis                    Scoreboard + all claims (open first)
@@ -556,6 +579,8 @@ Analysis & Trading:
   calibration                   Brier/skill per category from realized settlements
   reflect                       Generate lessons from settled positions
   hypothesis                    Falsifiable-claim registry (auto-filed by trades)
+  paper                         Forward-test ledger (no exchange orders)
+  mandate · kill · resume       Hard caps + instant trading halt
   analyze <ticker>              Full report: edge, drivers, Kelly sizing
   analyze <ticker> --refresh    Force fresh Octagon report
   buy <ticker> <n> [price] [yes|no]   Buy contracts (price in cents)
@@ -640,6 +665,8 @@ Analysis:
   /calibration                   Brier/skill per category from realized settlements
   /reflect                       Generate lessons from settled positions
   /hypothesis                    Falsifiable-claim registry (auto-filed by trades)
+  /paper                         Forward-test ledger (no exchange orders)
+  /mandate · /kill · /resume     Hard caps + instant trading halt
   /backtest                      Model accuracy scorecard + live edge scanner
   /analyze <ticker>              Full report: edge, drivers, Kelly sizing
   /analyze <ticker> refresh      Force fresh Octagon report

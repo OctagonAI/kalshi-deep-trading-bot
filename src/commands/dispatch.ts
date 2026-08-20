@@ -508,6 +508,32 @@ export async function dispatch(args: ParsedArgs): Promise<void> {
       return;
     }
 
+    // ─── paper (forward-test ledger) ──────────────────────────────────
+    if (resolved.canonical === 'paper') {
+      const res = await handleSlashCommand(['/paper', ...args.positionalArgs].join(' '));
+      let out = res?.output ?? '';
+      if (res?.asyncFollowUp) out = await res.asyncFollowUp();
+      if (json) {
+        console.log(JSON.stringify(wrapSuccess('paper', { output: out })));
+      } else {
+        console.log(out);
+      }
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
+    // ─── mandate / kill / resume (hard caps + instant halt) ───────────
+    if (resolved.canonical === 'mandate' || resolved.canonical === 'kill' || resolved.canonical === 'resume') {
+      const res = await handleSlashCommand(['/' + resolved.canonical, ...args.positionalArgs].join(' '));
+      if (json) {
+        console.log(JSON.stringify(wrapSuccess(resolved.canonical, { output: res?.output ?? '' })));
+      } else {
+        console.log(res?.output ?? '');
+      }
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
     // ─── hypothesis (falsifiable-claim registry) ──────────────────────
     if (resolved.canonical === 'hypothesis') {
       // Reuse the slash handler for identical semantics across surfaces.

@@ -10,6 +10,7 @@
  * Docs: https://docs.kalshi.com/api-reference/orders/create-order-v2
  */
 import { callKalshiApi, type KalshiApiResponse } from './api.js';
+import { enforceMandate } from '../../risk/mandate.js';
 
 export type V2Side = 'bid' | 'ask';
 export type V2TimeInForce = 'fill_or_kill' | 'good_till_canceled' | 'immediate_or_cancel';
@@ -80,6 +81,7 @@ export function buildV2Order(intent: V1OrderIntent): V2OrderBody {
 }
 
 export async function placeOrderV2(body: V2OrderBody): Promise<KalshiApiResponse> {
+  enforceMandate([body]);
   return callKalshiApi('POST', '/portfolio/events/orders', { body: body as unknown as Record<string, unknown> });
 }
 
@@ -94,6 +96,7 @@ export async function batchCancelOrdersV2(orderIds: string[]): Promise<KalshiApi
 }
 
 export async function batchCreateOrdersV2(orders: V2OrderBody[]): Promise<KalshiApiResponse> {
+  enforceMandate(orders);
   return callKalshiApi('POST', '/portfolio/events/orders/batched', {
     body: { orders: orders as unknown as Record<string, unknown>[] },
   });
@@ -110,12 +113,14 @@ export interface V2AmendIntent {
 }
 
 export async function amendOrderV2(intent: V2AmendIntent): Promise<KalshiApiResponse> {
+  const side = toV2Side(intent.action, intent.side);
+  const count = toV2Count(intent.count);
+  const price = toV2Price(intent.priceCents, intent.side);
+  enforceMandate([{
+    ticker: intent.ticker, side, count, price,
+    time_in_force: 'good_till_canceled', self_trade_prevention_type: 'taker_at_cross',
+  }]);
   return callKalshiApi('POST', `/portfolio/events/orders/${encodeURIComponent(intent.orderId)}/amend`, {
-    body: {
-      ticker: intent.ticker,
-      side: toV2Side(intent.action, intent.side),
-      count: toV2Count(intent.count),
-      price: toV2Price(intent.priceCents, intent.side),
-    },
+    body: { ticker: intent.ticker, side, count, price },
   });
 }
