@@ -54,6 +54,7 @@ import { addHypothesis, resolveHypothesis, listHypotheses, scoreboard, formatHyp
 import { getMandateStatus, formatMandateHuman, activateKillSwitch, deactivateKillSwitch, MandateViolation } from '../risk/mandate.js';
 import { needsBearCheck, runBearCheck, formatBearCheck, type BearCheckLlm } from '../eval/bear-check.js';
 import { openPaperPosition, settlePaperPositions, listPaperPositions, paperSummary, formatPaperHuman } from './paper.js';
+import { computeVariantLeaderboard, formatVariantLeaderboard } from '../backtest/variants.js';
 
 /** Fast-model structured-output wrapper for the bear check. */
 function makeBearCheckLlm(): BearCheckLlm | undefined {
@@ -197,6 +198,31 @@ export async function handleSlashCommand(input: string): Promise<CommandResult |
         asyncFollowUp: async () => {
           const resp = await handleEditorialThemes(parsed);
           return resp.ok ? formatEditorialThemesHuman(resp.data) : (resp.error?.message ?? 'themes failed');
+        },
+      };
+    }
+
+    // ─── /variants (strategy-variant leaderboard over backtest signals) ─
+    case 'variants': {
+      // Same flag surface as /backtest — one pipeline, segmented lenses.
+      const vArgs: Partial<ParsedArgs> = { subcommand: 'backtest' };
+      for (let i = 0; i < args.length; i++) {
+        const a = args[i];
+        if (a === '--resolved') vArgs.resolved = true;
+        else if (a === '--unresolved') vArgs.unresolved = true;
+        else if (a === '--category') vArgs.category = args[++i];
+        else if (a === '--days') { const v = Number(args[++i]); if (Number.isFinite(v) && v > 0) vArgs.days = v; }
+        else if (a === '--min-edge') { const v = Number(args[++i]?.replace('%', '')); if (Number.isFinite(v)) vArgs.minEdge = v / 100; }
+        else if (a === '--min-volume') { const v = Number(args[++i]); if (Number.isFinite(v) && v >= 0) vArgs.minVolume = v; }
+      }
+      return {
+        output: 'Scoring signals and segmenting variants (reuses the backtest pipeline)...',
+        asyncFollowUp: async () => {
+          const resp = await handleBacktest(defaultArgs(vArgs));
+          if (!resp.ok) return resp.error?.message ?? 'variants failed';
+          const minEdgePp = (vArgs.minEdge ?? 0.005) * 100;
+          const rows = computeVariantLeaderboard(resp.data.signals, minEdgePp);
+          return formatVariantLeaderboard(rows, minEdgePp);
         },
       };
     }

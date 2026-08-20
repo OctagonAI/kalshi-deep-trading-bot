@@ -43,6 +43,7 @@ import { makeReflectionLlm } from './index.js';
 import { handleSlashCommand } from './index.js';
 import { syncSettlements } from '../tools/kalshi/settle.js';
 import { getDb } from '../db/index.js';
+import { getBotSetting } from '../utils/bot-config.js';
 import { handleSeries, formatSeriesHuman } from './series.js';
 import { handleEditorialThemes, formatEditorialThemesHuman } from './editorial-themes.js';
 import { handleCatalysts, formatCatalystsHuman } from './catalysts.js';
@@ -505,6 +506,55 @@ export async function dispatch(args: ParsedArgs): Promise<void> {
         console.error(resp.error?.message ?? 'series failed');
       }
       process.exit(resp.ok ? ExitCode.SUCCESS : ExitCode.USER_ERROR);
+      return;
+    }
+
+    // ─── variants (strategy-variant leaderboard) ──────────────────────
+    if (resolved.canonical === 'variants') {
+      const { computeVariantLeaderboard, formatVariantLeaderboard } = await import('../backtest/variants.js');
+      const resp = await handleBacktest({ ...args, subcommand: 'backtest' });
+      if (!resp.ok) {
+        console.error(resp.error?.message ?? 'variants failed');
+        process.exit(ExitCode.USER_ERROR);
+        return;
+      }
+      const minEdgePp = (args.minEdge ?? 0.005) * 100;
+      const rows = computeVariantLeaderboard(resp.data.signals, minEdgePp);
+      if (json) {
+        console.log(JSON.stringify(wrapSuccess('variants', { min_edge_pp: minEdgePp, rows })));
+      } else {
+        console.log(formatVariantLeaderboard(rows, minEdgePp));
+      }
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
+    // ─── daemon (background prefetch/settle maintenance loop) ─────────
+    if (resolved.canonical === 'daemon') {
+      const { runDaemonCycle, formatCycleSummary } = await import('../daemon/loop.js');
+      const { makeReflectionLlm } = await import('./index.js');
+      const db = getDb();
+      const cfg = getBotSetting('daemon.interval_minutes');
+      const intervalMin = typeof cfg === 'number' && Number.isFinite(cfg) && cfg > 0 ? cfg : 15;
+      const once = args.positionalArgs[0]?.toLowerCase() === 'once';
+      console.log(once
+        ? 'Running one maintenance cycle...'
+        : `Maintenance daemon started — cycle every ${intervalMin}m (Ctrl-C to stop).`);
+
+      let stopped = false;
+      process.once('SIGINT', () => { stopped = true; console.log('\nStopping after current cycle...'); });
+
+      for (;;) {
+        const cycle = await runDaemonCycle(db, { reflectionLlm: makeReflectionLlm() });
+        console.log(formatCycleSummary(cycle));
+        if (once || stopped) break;
+        const wakeAt = Date.now() + intervalMin * 60_000;
+        while (Date.now() < wakeAt && !stopped) {
+          await new Promise((r) => setTimeout(r, 1_000));
+        }
+        if (stopped) break;
+      }
+      process.exit(ExitCode.SUCCESS);
       return;
     }
 

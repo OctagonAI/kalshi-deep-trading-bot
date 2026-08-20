@@ -434,6 +434,7 @@ export async function runCli(options?: { forceSetup?: boolean }) {
     { name: 'correlate', description: 'Pairwise correlation matrix (2-100 tickers)', getArgumentCompletions: usageHint('<ticker1> <ticker2> [...] [--window-days N]', 'e.g. KXA KXB KXC --window-days 90') },
     { name: 'events', description: 'Octagon events — outcome ladder per event', getArgumentCompletions: usageHint('<event_ticker> | --category Politics | --min-volume 10000', 'e.g. KXFEDCHAIRNOM-29 to drill in') },
     { name: 'trust', description: 'Trader Trust scorecard (per-market integrity scores)', getArgumentCompletions: usageHint('<event_ticker> [--market <market_ticker>] [--verbose]', 'e.g. KXMENWORLDCUP-26 --market KXMENWORLDCUP-26-FR') },
+    { name: 'variants', description: 'Strategy-variant leaderboard: backtest signals segmented by named filters', getArgumentCompletions: usageHint('[--days N] [--min-edge N] [--min-volume N] [--resolved]', 'e.g. /variants --days 7 --resolved') },
     { name: 'paper', description: 'Paper-trading ledger: forward-test without exchange orders', getArgumentCompletions: usageHint('buy|sell <ticker> <count> [price] [yes|no] — or bare for the ledger view', 'e.g. /paper buy KXFED-26SEP-T3 10 40 yes') },
     { name: 'mandate', description: 'Show hard trading caps + kill-switch status' },
     { name: 'kill', description: 'INSTANT HALT: refuse all new orders until /resume', getArgumentCompletions: usageHint('[reason]', 'e.g. /kill reviewing model regression') },

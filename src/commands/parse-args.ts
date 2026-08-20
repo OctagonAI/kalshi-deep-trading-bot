@@ -27,6 +27,10 @@ const SUBCOMMANDS = [
   'mandate', 'kill', 'resume',
   // Forward-test ledger
   'paper',
+  // Background maintenance loop
+  'daemon',
+  // Strategy-variant leaderboard
+  'variants',
 ] as const;
 
 export type Subcommand = (typeof SUBCOMMANDS)[number];

@@ -23,6 +23,7 @@ export interface BotConfig {
   alerts: { min_edge: number; channels: string[] };
   watch: { min_interval_minutes: number; ticker_interval_seconds: number };
   gateway: { whatsapp: { enabled: boolean } };
+  daemon: { interval_minutes: number };
   mandate: {
     kill_switch: boolean;
     kill_reason: string;
@@ -39,6 +40,7 @@ const DEFAULTS: BotConfig = {
   alerts: { min_edge: 0.05, channels: ['terminal'] },
   watch: { min_interval_minutes: 15, ticker_interval_seconds: 5 },
   gateway: { whatsapp: { enabled: false } },
+  daemon: { interval_minutes: 15 },
   mandate: { kill_switch: false, kill_reason: '', max_contracts_per_order: 100, max_notional_per_order: 100, max_daily_loss: 50 },
 };
 
@@ -137,6 +139,7 @@ const NUMERIC_VALIDATORS: Record<string, (v: number) => string | null> = {
   'mandate.max_notional_per_order': (v) => v > 0 ? null : 'must be > 0',
   'mandate.max_daily_loss': (v) => v > 0 ? null : 'must be > 0',
   'risk.bear_check_min_edge_pp': (v) => v > 0 ? null : 'must be > 0',
+  'daemon.interval_minutes': (v) => v > 0 ? null : 'must be > 0',
 };
 
 export function setBotSetting(dotKey: string, rawValue: string): { oldValue: unknown; newValue: unknown } {

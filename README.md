@@ -145,6 +145,8 @@ Type help for commands, or just ask a question.
 | `calibration` | Brier scores and per-category skill vs the market, from realized settlements (reliability buckets included) |
 | `reflect` | Reflection loop — turns each settled position into a terse lesson, re-surfaced inside `analyze` for the same series |
 | `hypothesis` | Falsifiable-claim registry — executed trades auto-file claims, settlements auto-resolve them; add thematic claims manually |
+| `variants [backtest flags]` | Strategy-variant leaderboard — one signal pipeline segmented through named filters (side, edge band, price band, confidence), ranked by ROI/maxDD |
+| `daemon [once]` | Background maintenance loop: index refresh, Octagon prefetch, settlements sync, paper settlement, reflection — keeps caches warm off the critical path |
 | `paper buy/sell ...` / `paper` | Paper-trading ledger — forward-test with real entry quotes and real settlements, zero exchange risk; scored like the backtest |
 | `mandate` / `kill [reason]` / `resume` | Hard trading caps (per-order size/notional, daily realized loss) enforced at order placement, plus an instant halt |
 

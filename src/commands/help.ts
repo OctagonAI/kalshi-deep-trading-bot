@@ -250,6 +250,26 @@ Flags:
 
 Output ranks pairs ascending by correlation — most-uncorrelated first.`,
 
+    variants: `**${p}variants** — Strategy-variant leaderboard
+
+${p}variants [--days N] [--min-edge N] [--min-volume N] [--resolved]
+
+Runs the backtest signal pipeline once, then scores named segments (NO-only,
+YES-only, edge bands, price bands, confidence, resolved-only) with the same
+definitions — hit rate, capital-weighted ROI, alpha vs always-NO, max
+drawdown, ROI/maxDD — ranked risk-adjusted. Operationalizes the manual
+"how does the strategy do if I only take X" segmentation.`,
+
+    daemon: `**${p}daemon** — Background maintenance loop (CLI only)
+
+kalshi daemon                    Run forever; cycle every daemon.interval_minutes (default 15m)
+kalshi daemon once               Single cycle, then exit
+
+Each cycle: event-index refresh → Octagon events prefetch → settlements
+sync (realized P&L, Brier, hypothesis auto-resolution) → paper-position
+settlement → reflection lessons. Every step is fail-soft. Run it under
+tmux/systemd to keep every cache warm off the critical path.`,
+
     paper: `**${p}paper** — Paper-trading ledger (forward test, no exchange orders)
 
 ${p}paper                         Ledger view; settles resolved positions first
@@ -580,6 +600,8 @@ Analysis & Trading:
   reflect                       Generate lessons from settled positions
   hypothesis                    Falsifiable-claim registry (auto-filed by trades)
   paper                         Forward-test ledger (no exchange orders)
+  variants                      Strategy-variant leaderboard (segmented backtest)
+  daemon [once]                 Background maintenance loop (keeps caches warm)
   mandate · kill · resume       Hard caps + instant trading halt
   analyze <ticker>              Full report: edge, drivers, Kelly sizing
   analyze <ticker> --refresh    Force fresh Octagon report
@@ -666,6 +688,7 @@ Analysis:
   /reflect                       Generate lessons from settled positions
   /hypothesis                    Falsifiable-claim registry (auto-filed by trades)
   /paper                         Forward-test ledger (no exchange orders)
+  /variants                      Strategy-variant leaderboard (segmented backtest)
   /mandate · /kill · /resume     Hard caps + instant trading halt
   /backtest                      Model accuracy scorecard + live edge scanner
   /analyze <ticker>              Full report: edge, drivers, Kelly sizing
