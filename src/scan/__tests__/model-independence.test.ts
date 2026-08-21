@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  __setProvenanceSeen,
+  apiServesProvenance,
   classifyIndependence,
   edgeExceedsEvidenceCap,
   formatIndependenceNote,
   maxExpressibleEdgePp,
+  noteProvenanceObserved,
 } from '../model-independence';
 
 describe('classifyIndependence', () => {
@@ -39,7 +42,8 @@ describe('evidence caps', () => {
     expect(edgeExceedsEvidenceCap(30, { evidence_grade: 'D' })).toBe(true);
     expect(edgeExceedsEvidenceCap(-30, { evidence_grade: 'D' })).toBe(true);
     expect(edgeExceedsEvidenceCap(2, { evidence_grade: 'D' })).toBe(false);
-    expect(edgeExceedsEvidenceCap(30, {})).toBe(false, 'unknown grade cannot be judged');
+    // An unknown grade cannot be judged, so it is not flagged.
+    expect(edgeExceedsEvidenceCap(30, {})).toBe(false);
   });
 });
 
@@ -60,7 +64,26 @@ describe('formatIndependenceNote', () => {
     expect(formatIndependenceNote(8, { model_probability_source: 'recalibrated', evidence_grade: 'A' })).toBeNull();
   });
 
-  test('missing provenance is surfaced rather than passed over', () => {
+  test('stays silent about missing provenance until the API is seen serving it', () => {
+    // The fields ship in a later API release. Warning on every analysis until
+    // then would train the reader to ignore the warning, and it would still be
+    // firing on the day it starts meaning something.
+    __setProvenanceSeen(false);
+    expect(formatIndependenceNote(8, null)).toBeNull();
+    expect(formatIndependenceNote(8, {})).toBeNull();
+  });
+
+  test('once provenance is observed, its absence becomes reportable', () => {
+    __setProvenanceSeen(false);
+    noteProvenanceObserved({ model_probability_source: 'recalibrated', evidence_grade: 'B' });
+    expect(apiServesProvenance()).toBe(true);
     expect(formatIndependenceNote(8, null)).toContain('provenance unavailable');
+    __setProvenanceSeen(false);
+  });
+
+  test('all-null provenance does not count as the API serving it', () => {
+    __setProvenanceSeen(false);
+    noteProvenanceObserved({ model_probability_source: null, evidence_grade: null });
+    expect(apiServesProvenance()).toBe(false);
   });
 });

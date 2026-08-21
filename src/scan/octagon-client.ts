@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite';
-import type { ModelProvenance } from './model-independence.js';
+import { noteProvenanceObserved, type ModelProvenance } from './model-independence.js';
 import type { AuditTrail } from '../audit/trail.js';
 import {
   insertReport,
@@ -394,6 +394,9 @@ export class OctagonClient {
               model_probability_source: match.model_probability_source ?? null,
               evidence_grade: match.evidence_grade ?? null,
             };
+            // Teaches the independence check that this deployment serves the
+            // fields, so a later absence becomes meaningful rather than noise.
+            noteProvenanceObserved(provenance);
           }
         }
       } catch { /* malformed outcome JSON — fall through */ }

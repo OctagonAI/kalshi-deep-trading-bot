@@ -39,6 +39,37 @@ export const GRADE_MAX_DEVIATION_PP: Record<string, number> = {
  */
 const MECHANICAL_SOURCES = new Set(['market_baseline', 'unmodeled', 'out_of_scope', 'determined']);
 
+/**
+ * Whether this deployment's API serves provenance at all.
+ *
+ * The fields ship with a later API release, so until that is deployed every
+ * contract legitimately lacks them. Warning "provenance unavailable" on every
+ * analysis in the meantime would teach the reader to ignore the warning, and
+ * it would still be firing on the day it starts meaning something.
+ *
+ * So the check configures itself: stay quiet until provenance is observed on
+ * any contract, and only then treat its absence on a *particular* contract as
+ * worth reporting. No flag to set, and it degrades correctly in both
+ * directions -- an older deployment simply never trips it.
+ */
+let provenanceSeen = false;
+
+export function noteProvenanceObserved(p: ModelProvenance | null | undefined): void {
+  if (!p) return;
+  if ((p.model_probability_source ?? null) !== null || (p.evidence_grade ?? null) !== null) {
+    provenanceSeen = true;
+  }
+}
+
+/** Exposed for tests; production learns this from live responses. */
+export function __setProvenanceSeen(value: boolean): void {
+  provenanceSeen = value;
+}
+
+export function apiServesProvenance(): boolean {
+  return provenanceSeen;
+}
+
 export function classifyIndependence(p: ModelProvenance | null | undefined): IndependenceLevel {
   if (!p) return 'unknown';
   const source = (p.model_probability_source ?? '').trim().toLowerCase();
@@ -90,7 +121,10 @@ export function formatIndependenceNote(
     );
   }
   if (level === 'unknown') {
-    return '  ⚠ Model provenance unavailable — cannot tell an independent estimate from the market price re-expressed.';
+    // Silent until this deployment is known to serve the fields at all --
+    // otherwise it fires on every analysis and stops being read.
+    if (!provenanceSeen) return null;
+    return '  ⚠ Model provenance unavailable for this contract — cannot tell an independent estimate from the market price re-expressed.';
   }
   return null;
 }
