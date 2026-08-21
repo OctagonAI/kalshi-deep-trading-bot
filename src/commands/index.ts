@@ -53,6 +53,7 @@ import { generateMissingLessons, getLessonsForCategory, getRecentLessons, format
 import { addHypothesis, resolveHypothesis, listHypotheses, scoreboard, formatHypothesesHuman, type HypothesisStatus } from '../db/hypotheses.js';
 import { getMandateStatus, formatMandateHuman, activateKillSwitch, deactivateKillSwitch, MandateViolation } from '../risk/mandate.js';
 import { needsBearCheck, runBearCheck, formatBearCheck, type BearCheckLlm } from '../eval/bear-check.js';
+import { formatIndependenceNote, type ModelProvenance } from '../scan/model-independence.js';
 import { openPaperPosition, settlePaperPositions, listPaperPositions, paperSummary, formatPaperHuman, winningSide } from './paper.js';
 import { computeVariantLeaderboard, formatVariantLeaderboard } from '../backtest/variants.js';
 
@@ -709,6 +710,16 @@ async function handleAnalyzeCommand(args: string[]): Promise<CommandResult> {
       const block = formatLessonsForContext(lessons);
       if (block) output += `\n\n${block}`;
     } catch { /* lessons are additive — never break analyze */ }
+
+    // Provenance: an edge computed against a market-anchored model is not a
+    // disagreement with the market. Say so before anyone acts on it.
+    try {
+      const note = formatIndependenceNote(
+        data.edge !== null ? data.edge * 100 : null,
+        (data as { provenance?: ModelProvenance }).provenance ?? null,
+      );
+      if (note) output += `\n\n${note}`;
+    } catch { /* advisory only */ }
 
     // Adversarial bear-check: extreme edges get a skeptic pass appended.
     const edgePp = data.edge !== null && data.modelProb !== null ? data.edge * 100 : null;

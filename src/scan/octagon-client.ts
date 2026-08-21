@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import type { ModelProvenance } from './model-independence.js';
 import type { AuditTrail } from '../audit/trail.js';
 import {
   insertReport,
@@ -359,7 +360,7 @@ export class OctagonClient {
 
   // --- Private helpers ---
 
-  private mapJsonToReport(parsed: Record<string, unknown>, defaults: OctagonReport): OctagonReport & { modelProbExplicit: boolean } {
+  private mapJsonToReport(parsed: Record<string, unknown>, defaults: OctagonReport): OctagonReport & { modelProbExplicit: boolean; provenance: ModelProvenance } {
     // Handle nested cache response: { versions: [{ model_probability, market_probability, ... }] }
     const versions = parsed.versions as Array<Record<string, unknown>> | undefined;
     const source = versions?.[0] ?? parsed;
@@ -372,6 +373,7 @@ export class OctagonClient {
     // cached shapes carry `outcome_probabilities_json` (JSON string).
     let modelProb: number | null = null;
     let marketProb: number | null = null;
+    let provenance: ModelProvenance | null = null;
     const src = source as Record<string, unknown>;
     const outcomeJson = src.outcome_probabilities ?? src.outcome_probabilities_json;
     if (outcomeJson != null) {
@@ -385,6 +387,13 @@ export class OctagonClient {
           if (match) {
             modelProb = this.toProbFromJson(match.model_probability);
             marketProb = this.toProbFromJson(match.market_probability);
+            // Provenance travels with the probability: without it a consumer
+            // cannot tell an independent estimate from the market price
+            // re-expressed, and the CLI trades the difference between them.
+            provenance = {
+              model_probability_source: match.model_probability_source ?? null,
+              evidence_grade: match.evidence_grade ?? null,
+            };
           }
         }
       } catch { /* malformed outcome JSON — fall through */ }
@@ -401,6 +410,10 @@ export class OctagonClient {
     return {
       ...defaults,
       modelProbExplicit: outcomeExplicit || eventExplicit,
+      provenance: provenance ?? {
+        model_probability_source: (src.model_probability_source as string | undefined) ?? null,
+        evidence_grade: (src.evidence_grade as string | undefined) ?? null,
+      },
       modelProb,
       marketProb,
       mispricingSignal: this.toSignal(source.mispricingSignal ?? source.mispricing_signal) ?? this.inferSignal(

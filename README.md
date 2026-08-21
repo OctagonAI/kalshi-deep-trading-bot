@@ -143,6 +143,7 @@ Type help for commands, or just ask a question.
 | `octagon <question>` | Conversational Octagon Prediction Markets Agent — discovery, edge screens, similar markets, reports. Multi-turn: context persists across TUI turns *and* one-shot CLI runs (stored in `~/.kalshi-bot`); `octagon reset` starts a new conversation. Example: `kalshi octagon "top Politics edges"` then `kalshi octagon "pull the report for the first one"` |
 | `portfolio settlements` | Realized P&L ledger — auto-syncs settled positions from Kalshi, joined with the model's view at entry |
 | `calibration` | Brier scores and per-category skill vs the market, from realized settlements (reliability buckets included) |
+| *(edge provenance)* | `analyze` now flags when an edge is **mechanical** — Octagon's model probability is market-anchored, so a `market_baseline` source or a low `evidence_grade` means the "edge" is the debias curve, not a disagreement with the market |
 | `reflect` | Reflection loop — turns each settled position into a terse lesson, re-surfaced inside `analyze` for the same series |
 | `hypothesis` | Falsifiable-claim registry — executed trades auto-file claims, settlements auto-resolve them; add thematic claims manually |
 | `variants [backtest flags]` | Strategy-variant leaderboard — one signal pipeline segmented through named filters (side, edge band, price band, confidence), ranked by ROI/maxDD |

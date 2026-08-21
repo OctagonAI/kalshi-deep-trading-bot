@@ -23,6 +23,12 @@ import type { RiskGateResult } from '../risk/gate.js';
 import { formatTable } from './scan-formatters.js';
 
 export interface AnalyzeData {
+  /**
+   * Provenance of modelProb, when the report carried it. Lets a caller tell
+   * an independent estimate from the market price re-expressed before acting
+   * on `edge`. Null on older cached reports.
+   */
+  provenance?: { model_probability_source?: string | null; evidence_grade?: string | null } | null;
   ticker: string;
   eventTicker: string;
   title: string;
@@ -481,6 +487,8 @@ export async function handleAnalyze(
     hasModel,
     hasMarketPrice,
     modelProb: hasModel ? snapshot.modelProb : null,
+    // Carried through so the caller can weight the edge (see model-independence).
+    provenance: (report as { provenance?: unknown }).provenance ?? null,
     marketProb: hasMarketPrice ? marketProb : null,
     edge: canComputeEdge ? snapshot.edge : null,
     edgePp: canComputeEdge ? edgePp : null,

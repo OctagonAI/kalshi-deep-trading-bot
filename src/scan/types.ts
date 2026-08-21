@@ -27,6 +27,12 @@ export interface Source {
 }
 
 export interface OctagonReport {
+  /**
+   * Provenance of modelProb. Absent on older cached rows. Without it a
+   * consumer cannot tell an independent estimate from the market price
+   * re-expressed -- and this CLI trades the difference between the two.
+   */
+  provenance?: { model_probability_source?: string | null; evidence_grade?: string | null } | null;
   ticker: string;
   eventTicker: string;
   modelProb: number;
