@@ -1,7 +1,7 @@
 import { callKalshiApi, KalshiApiError } from '../tools/kalshi/api.js';
 import { logger } from '../utils/logger.js';
 import type { OctagonInvoker, OctagonVariant } from './types.js';
-import { fetchReportVersions, generateReportAndWait } from './octagon-reports-api.js';
+import { fetchReportVersions, generateReportAndWait, OctagonReportsApiError } from './octagon-reports-api.js';
 import { looksLikeTicker } from '../commands/similar.js';
 
 /**
@@ -103,13 +103,16 @@ export function extractTextFromResponse(data: unknown): string {
  * to the event ticker the Reports API is addressed by.
  */
 export async function resolveEventTicker(input: string): Promise<string> {
+  let candidate = input;
   if (input.startsWith('https://kalshi.com/')) {
-    // URL format: /markets/{series}/{slug}/{event_ticker}
+    // URL formats end in an event ticker, a market ticker (tool-built URLs),
+    // or a series slug — extract the last segment and resolve it below like
+    // any bare ticker, so market-ticker URLs land on the parent event.
     const last = input.split('?')[0].split('/').filter(Boolean).pop();
     if (!last) throw new Error(`Could not extract an event ticker from URL: ${input}`);
-    return last.toUpperCase();
+    candidate = last;
   }
-  const ticker = input.toUpperCase();
+  const ticker = candidate.toUpperCase();
   try {
     const market = await callKalshiApi('GET', `/markets/${ticker}`);
     const data = ((market as any).market ?? market) as Record<string, unknown>;
@@ -140,9 +143,19 @@ export async function callOctagon(input: string, variant: OctagonVariant): Promi
     // probabilities from — markdown regex extraction is the fallback that
     // produced 0.5-placeholder edges.
     if (variant === 'cache') {
-      const res = await fetchReportVersions(eventTicker, { version: 'latest' });
-      if (res.markdown_report) return JSON.stringify(res);
-      return JSON.stringify({ versions: res.versions ?? [] });
+      try {
+        const res = await fetchReportVersions(eventTicker, { version: 'latest' });
+        if (res.markdown_report) return JSON.stringify(res);
+        return JSON.stringify({ versions: res.versions ?? [] });
+      } catch (err) {
+        // An unknown event is a cache MISS, not an error — the legacy :cache
+        // variant guaranteed the empty-versions envelope, and scan/analyze
+        // key their miss-triggered refresh logic off it.
+        if (err instanceof OctagonReportsApiError && err.statusCode === 404) {
+          return JSON.stringify({ versions: [] });
+        }
+        throw err;
+      }
     }
     const { envelope } = await generateReportAndWait(eventTicker, {
       onProgress: (msg) => logger.info(`[octagon] ${msg}`),

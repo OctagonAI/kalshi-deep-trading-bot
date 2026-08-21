@@ -1,4 +1,5 @@
 import { getDb } from '../db/index.js';
+import { buildV2Order, placeOrderV2 } from '../tools/kalshi/orders-v2.js';
 import { formatBoxHeader } from './formatters.js';
 import { insertEdge } from '../db/edge.js';
 import { getLatestReport } from '../db/octagon-cache.js';
@@ -729,17 +730,18 @@ export async function promptAnalyzeActions(data: AnalyzeData): Promise<void> {
           }
 
           try {
-            const orderPayload: Record<string, unknown> = {
-              ticker: data.ticker,
-              action: 'sell',
-              side: sellSide,
-              type: 'limit',
-              count: sellSize,
-            };
-            if (sellSide === 'yes') orderPayload.yes_price = closePrice;
-            else orderPayload.no_price = closePrice;
-
-            const orderRes = await callKalshiApi('POST', '/portfolio/orders', { body: orderPayload });
+            // V2 order path (V1 writes 410; mandate enforced in placeOrderV2).
+            // closePrice is quoted on the position's own side, matching
+            // buildV2Order's side-relative priceCents contract.
+            const orderRes = await placeOrderV2(
+              buildV2Order({
+                ticker: data.ticker,
+                action: 'sell',
+                side: sellSide,
+                count: sellSize,
+                priceCents: closePrice,
+              })
+            );
             const order = (orderRes.order ?? orderRes) as KalshiOrder;
 
             const db = getDb();
@@ -804,17 +806,16 @@ export async function promptAnalyzeActions(data: AnalyzeData): Promise<void> {
         }
 
         try {
-          const orderPayload: Record<string, unknown> = {
-            ticker: data.ticker,
-            action: 'buy',
-            side,
-            type: 'limit',
-            count: data.kelly.contracts,
-          };
-          if (side === 'yes') orderPayload.yes_price = price;
-          else orderPayload.no_price = price;
-
-          const orderRes = await callKalshiApi('POST', '/portfolio/orders', { body: orderPayload });
+          // V2 order path (V1 writes 410; mandate enforced in placeOrderV2).
+          const orderRes = await placeOrderV2(
+            buildV2Order({
+              ticker: data.ticker,
+              action: 'buy',
+              side,
+              count: data.kelly.contracts,
+              priceCents: price,
+            })
+          );
           const order = (orderRes.order ?? orderRes) as KalshiOrder;
 
           const db = getDb();

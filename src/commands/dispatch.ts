@@ -40,10 +40,11 @@ import { handleOctagonChat } from './octagon-chat.js';
 import { computeCalibration, formatCalibrationHuman } from '../eval/calibration.js';
 import { generateMissingLessons, getRecentLessons } from '../eval/reflection.js';
 import { makeReflectionLlm } from './index.js';
-import { handleSlashCommand } from './index.js';
+import { executeSlashCommand } from './index.js';
 import { syncSettlements } from '../tools/kalshi/settle.js';
 import { getDb } from '../db/index.js';
 import { getBotSetting } from '../utils/bot-config.js';
+import { buildV2Order, placeOrderV2, cancelOrderV2 } from '../tools/kalshi/orders-v2.js';
 import { handleSeries, formatSeriesHuman } from './series.js';
 import { handleEditorialThemes, formatEditorialThemesHuman } from './editorial-themes.js';
 import { handleCatalysts, formatCatalystsHuman } from './catalysts.js';
@@ -560,7 +561,7 @@ export async function dispatch(args: ParsedArgs): Promise<void> {
 
     // ─── paper (forward-test ledger) ──────────────────────────────────
     if (resolved.canonical === 'paper') {
-      const res = await handleSlashCommand(['/paper', ...args.positionalArgs].join(' '));
+      const res = await executeSlashCommand('paper', args.positionalArgs);
       let out = res?.output ?? '';
       if (res?.asyncFollowUp) out = await res.asyncFollowUp();
       if (json) {
@@ -574,7 +575,7 @@ export async function dispatch(args: ParsedArgs): Promise<void> {
 
     // ─── mandate / kill / resume (hard caps + instant halt) ───────────
     if (resolved.canonical === 'mandate' || resolved.canonical === 'kill' || resolved.canonical === 'resume') {
-      const res = await handleSlashCommand(['/' + resolved.canonical, ...args.positionalArgs].join(' '));
+      const res = await executeSlashCommand(resolved.canonical, args.positionalArgs);
       if (json) {
         console.log(JSON.stringify(wrapSuccess(resolved.canonical, { output: res?.output ?? '' })));
       } else {
@@ -587,7 +588,7 @@ export async function dispatch(args: ParsedArgs): Promise<void> {
     // ─── hypothesis (falsifiable-claim registry) ──────────────────────
     if (resolved.canonical === 'hypothesis') {
       // Reuse the slash handler for identical semantics across surfaces.
-      const res = await handleSlashCommand(['/hypothesis', ...args.positionalArgs].join(' '));
+      const res = await executeSlashCommand('hypothesis', args.positionalArgs);
       if (json) {
         console.log(JSON.stringify(wrapSuccess('hypothesis', { output: res?.output ?? '' })));
       } else {
@@ -778,22 +779,23 @@ export async function dispatch(args: ParsedArgs): Promise<void> {
         }
         effectivePrice = quoteResult.cents;
       }
-      const body: Record<string, unknown> = {
-        ticker: ticker.toUpperCase(),
-        action: subcommand,
-        side: tradeSide,
-        type: 'limit',
-        count: validated.count,
-        ...(tradeSide === 'no'
-          ? { no_price: effectivePrice }
-          : { yes_price: effectivePrice }),
-      };
-      const data = await callKalshiApi('POST', '/portfolio/orders', { body });
+      // V2 order path — V1 /portfolio/orders writes return 410 Gone, and the
+      // mandate/kill-switch chokepoint lives inside placeOrderV2.
+      const data = await placeOrderV2(
+        buildV2Order({
+          ticker: ticker.toUpperCase(),
+          action: subcommand as 'buy' | 'sell',
+          side: tradeSide,
+          count: validated.count,
+          priceCents: effectivePrice,
+        })
+      );
       if (json) {
         console.log(JSON.stringify(wrapSuccess(subcommand, data)));
       } else {
-        const order = data.order as Record<string, unknown> | undefined;
-        console.log(order ? `Order placed. ID: ${order.order_id} | Status: ${order.status}` : `Order submitted.`);
+        const filled = parseFloat(String(data.fill_count ?? '0'));
+        const remaining = parseFloat(String(data.remaining_count ?? '0'));
+        console.log(data.order_id ? `Order placed. ID: ${data.order_id} | Filled: ${filled} | Resting: ${remaining}` : `Order submitted.`);
       }
       return;
     }
@@ -813,7 +815,7 @@ export async function dispatch(args: ParsedArgs): Promise<void> {
         return;
       }
       try {
-        await callKalshiApi('DELETE', `/portfolio/orders/${orderId}`);
+        await cancelOrderV2(orderId);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         const hint = msg.includes('404') ? ' (order not found or already filled)' : '';

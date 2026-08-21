@@ -7,6 +7,7 @@
  * actually happened. Rows are immutable; syncs are idempotent.
  */
 import type { Database } from 'bun:sqlite';
+import { computeBrier } from '../eval/brier.js';
 
 export interface SettlementRow {
   ticker: string;
@@ -112,9 +113,12 @@ export function recordSettlement(db: Database, s: KalshiSettlement): boolean {
 
   // Materialize the Brier score for calibration when we had a model view at
   // entry. Uses the entry-time-bounded probability captured above — never the
-  // latest edge row, which would be hindsight.
-  if (result.changes > 0 && entry) {
-    const outcome = s.market_result.toLowerCase() === 'yes' ? 1 : 0;
+  // latest edge row, which would be hindsight. Only binary outcomes score:
+  // a voided/scalar result has no 0/1 truth, and writing outcome=0 for it
+  // would fabricate a (possibly huge) Brier penalty.
+  const resultLower = s.market_result.toLowerCase();
+  if (result.changes > 0 && entry && (resultLower === 'yes' || resultLower === 'no')) {
+    const outcome = resultLower === 'yes' ? 1 : 0;
     const category = (s.event_ticker ?? s.ticker).split('-')[0] || 'unknown';
     db.prepare(
       `INSERT INTO brier_scores (ticker, event_ticker, category, model_prob, actual_outcome, brier_score, settled_at)
@@ -125,7 +129,7 @@ export function recordSettlement(db: Database, s: KalshiSettlement): boolean {
       category,
       entry.model_prob,
       outcome,
-      (entry.model_prob - outcome) ** 2,
+      computeBrier(entry.model_prob, outcome as 0 | 1),
       settledEpoch,
     );
   }
@@ -164,9 +168,10 @@ export function summarizeSettlements(db: Database): SettlementSummary {
               COALESCE(SUM(fee_cost), 0) AS total_fees,
               COALESCE(SUM(realized_pnl > 0), 0) AS wins,
               COALESCE(SUM(realized_pnl < 0), 0) AS losses,
-              COALESCE(SUM(edge_entry IS NOT NULL AND edge_entry != 0), 0) AS with_model_view,
+              COALESCE(SUM(edge_entry IS NOT NULL AND edge_entry != 0 AND LOWER(market_result) IN ('yes', 'no')), 0) AS with_model_view,
               COALESCE(SUM(
                 edge_entry IS NOT NULL AND edge_entry != 0
+                AND LOWER(market_result) IN ('yes', 'no')
                 AND ((edge_entry > 0) = (LOWER(market_result) = 'yes'))
               ), 0) AS model_side_wins
        FROM settlements`,

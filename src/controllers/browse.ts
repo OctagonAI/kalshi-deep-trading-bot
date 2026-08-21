@@ -925,12 +925,13 @@ export class BrowseController {
       const rawCache = await callOctagon(ticker, 'cache');
       const parsed = JSON.parse(rawCache);
       const version = parsed.versions?.[0];
-      if (!version?.outcome_probabilities_json) return probs;
+      // Reports API envelope carries outcome_probabilities (array); older
+      // cached shapes carry outcome_probabilities_json (JSON string).
+      const rawOutcomes = version?.outcome_probabilities ?? version?.outcome_probabilities_json;
+      if (!rawOutcomes) return probs;
 
       const outcomes: Array<{ market_ticker: string; model_probability: number }> =
-        typeof version.outcome_probabilities_json === 'string'
-          ? JSON.parse(version.outcome_probabilities_json)
-          : version.outcome_probabilities_json;
+        typeof rawOutcomes === 'string' ? JSON.parse(rawOutcomes) : rawOutcomes;
 
       for (const o of outcomes) {
         if (typeof o.model_probability === 'number' && o.market_ticker) {

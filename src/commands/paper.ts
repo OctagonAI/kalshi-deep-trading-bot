@@ -33,11 +33,23 @@ export function winningSide(action: 'buy' | 'sell', side: 'yes' | 'no'): 'yes' |
   return (action === 'buy') === (side === 'yes') ? 'yes' : 'no';
 }
 
-/** Flat-bet P&L per the backtest definitions, in dollars. */
+/** Dollars at risk: a buyer stakes the price, a seller stakes the complement. */
+export function capitalAtRisk(p: { action: 'buy' | 'sell'; count: number; entry_price: number }): number {
+  const perContract = p.action === 'buy' ? p.entry_price : 100 - p.entry_price;
+  return (perContract / 100) * p.count;
+}
+
+/**
+ * Flat-bet P&L in dollars. entry_price is quoted on the position's own side.
+ * Buyer at p: win +(100-p), lose -p. Seller at p keeps the premium on a win
+ * (+p) and pays out the complement on a loss (-(100-p)) — short economics
+ * are the mirror of the long side, not the same formula.
+ */
 export function settlePnl(p: { action: 'buy' | 'sell'; side: 'yes' | 'no'; count: number; entry_price: number }, result: 'yes' | 'no'): number {
   const won = winningSide(p.action, p.side) === result;
-  const stake = (p.entry_price / 100) * p.count;
-  return won ? ((100 - p.entry_price) / 100) * p.count : -stake;
+  const winPerContract = p.action === 'buy' ? 100 - p.entry_price : p.entry_price;
+  const lossPerContract = p.action === 'buy' ? p.entry_price : 100 - p.entry_price;
+  return won ? (winPerContract / 100) * p.count : -(lossPerContract / 100) * p.count;
 }
 
 export function openPaperPosition(
@@ -136,9 +148,9 @@ export function paperSummary(db: Database): PaperSummary {
       `SELECT
          COALESCE(SUM(status = 'open'), 0) AS open,
          COALESCE(SUM(status = 'settled'), 0) AS settled,
-         COALESCE(SUM(CASE WHEN status = 'open' THEN entry_price / 100.0 * count END), 0) AS open_capital,
+         COALESCE(SUM(CASE WHEN status = 'open' THEN (CASE WHEN action = 'buy' THEN entry_price ELSE 100 - entry_price END) / 100.0 * count END), 0) AS open_capital,
          COALESCE(SUM(CASE WHEN status = 'settled' THEN realized_pnl END), 0) AS realized_pnl,
-         COALESCE(SUM(CASE WHEN status = 'settled' THEN entry_price / 100.0 * count END), 0) AS capital_settled,
+         COALESCE(SUM(CASE WHEN status = 'settled' THEN (CASE WHEN action = 'buy' THEN entry_price ELSE 100 - entry_price END) / 100.0 * count END), 0) AS capital_settled,
          COALESCE(SUM(status = 'settled' AND realized_pnl > 0), 0) AS wins,
          COALESCE(SUM(status = 'settled' AND realized_pnl < 0), 0) AS losses
        FROM paper_positions`,

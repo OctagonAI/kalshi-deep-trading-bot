@@ -10,6 +10,7 @@
  *    frequency per decile — the classic reliability diagram, in a table.
  */
 import type { Database } from 'bun:sqlite';
+import { computeBrier } from './brier.js';
 
 export interface CategoryCalibration {
   category: string;
@@ -83,7 +84,7 @@ export function computeCalibration(db: Database): CalibrationReport {
 
   for (const r of scored) {
     const outcome = r.market_result.toLowerCase() === 'yes' ? 1 : 0;
-    const bm = (r.model_prob_entry - outcome) ** 2;
+    const bm = computeBrier(r.model_prob_entry, outcome as 0 | 1);
 
     const cat = categoryOf(r.event_ticker, r.ticker);
     const c = byCategory.get(cat) ?? { n: 0, bmPaired: 0, bmkt: 0, pairedN: 0, pnl: 0 };
@@ -91,7 +92,7 @@ export function computeCalibration(db: Database): CalibrationReport {
     c.pnl += r.realized_pnl;
 
     if (r.market_prob_entry !== null) {
-      const bmkt = (r.market_prob_entry - outcome) ** 2;
+      const bmkt = computeBrier(r.market_prob_entry, outcome as 0 | 1);
       brierModelSum += bm;
       brierMarketSum += bmkt;
       pairedN++;

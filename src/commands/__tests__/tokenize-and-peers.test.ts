@@ -60,3 +60,15 @@ dtk('tokenizeCommand attached quotes', () => {
     etk(tok('pre"mid dle"post')).toEqual(['premid dlepost']);
   });
 });
+
+dtk('apostrophes in words are not quote delimiters', () => {
+  ttk('contractions pass through intact', () => {
+    etk(tok("octagon what's the market's view")).toEqual(['octagon', "what's", 'the', "market's", 'view']);
+    etk(tok("kill don't chase CPI")).toEqual(['kill', "don't", 'chase', 'CPI']);
+  });
+
+  ttk('single quotes still delimit at token boundaries', () => {
+    etk(tok("show 'Elon Musk / Tesla'")).toEqual(['show', 'Elon Musk / Tesla']);
+    etk(tok("--name='multi word'")).toEqual(['--name=multi word']);
+  });
+});

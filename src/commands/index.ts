@@ -53,7 +53,7 @@ import { generateMissingLessons, getLessonsForCategory, getRecentLessons, format
 import { addHypothesis, resolveHypothesis, listHypotheses, scoreboard, formatHypothesesHuman, type HypothesisStatus } from '../db/hypotheses.js';
 import { getMandateStatus, formatMandateHuman, activateKillSwitch, deactivateKillSwitch, MandateViolation } from '../risk/mandate.js';
 import { needsBearCheck, runBearCheck, formatBearCheck, type BearCheckLlm } from '../eval/bear-check.js';
-import { openPaperPosition, settlePaperPositions, listPaperPositions, paperSummary, formatPaperHuman } from './paper.js';
+import { openPaperPosition, settlePaperPositions, listPaperPositions, paperSummary, formatPaperHuman, winningSide } from './paper.js';
 import { computeVariantLeaderboard, formatVariantLeaderboard } from '../backtest/variants.js';
 
 /** Fast-model structured-output wrapper for the bear check. */
@@ -112,13 +112,47 @@ export interface CommandResult {
 export function tokenizeCommand(line: string): string[] {
   // A token is a run of bare characters and/or quoted segments with no
   // whitespace between them, so attached values like --theme="Bitcoin
-  // Breakout" stay one token. Unterminated quotes degrade to bare text.
+  // Breakout" stay one token. Double quotes always delimit; single quotes
+  // delimit only at a token boundary or after '=', so apostrophes inside
+  // words (don't, market's) pass through untouched. Unterminated quotes
+  // degrade to bare text.
   const tokens: string[] = [];
-  const re = /(?:[^\s"']+|"[^"]*"|'[^']*')+/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(line)) !== null) {
-    tokens.push(m[0].replace(/"([^"]*)"|'([^']*)'/g, (_all, dq, sq) => dq ?? sq ?? ''));
+  let current = '';
+  let started = false;
+  let i = 0;
+
+  const flush = () => {
+    if (started) tokens.push(current);
+    current = '';
+    started = false;
+  };
+
+  while (i < line.length) {
+    const ch = line[i];
+    if (/\s/.test(ch)) {
+      flush();
+      i++;
+      continue;
+    }
+    const atBoundary = !started || current.endsWith('=');
+    if (ch === '"' || (ch === "'" && atBoundary)) {
+      const close = line.indexOf(ch, i + 1);
+      if (close === -1) {
+        // Unterminated: drop the quote char, keep the text.
+        started = true;
+        i++;
+        continue;
+      }
+      current += line.slice(i + 1, close);
+      started = true;
+      i = close + 1;
+      continue;
+    }
+    current += ch;
+    started = true;
+    i++;
   }
+  flush();
   return tokens;
 }
 
@@ -127,8 +161,15 @@ export async function handleSlashCommand(input: string): Promise<CommandResult |
   if (!trimmed.startsWith('/')) return null;
 
   const parts = tokenizeCommand(trimmed.slice(1).trim());
-  const command = parts[0]?.toLowerCase();
-  const args = parts.slice(1);
+  return executeSlashCommand(parts[0]?.toLowerCase(), parts.slice(1));
+}
+
+/**
+ * Execute a slash command from pre-tokenized arguments. CLI dispatch calls
+ * this directly with argv tokens so shell-quoted values ("Fed won't cut")
+ * are never flattened and re-tokenized.
+ */
+export async function executeSlashCommand(command: string | undefined, args: string[]): Promise<CommandResult | null> {
   // Enrich Octagon-Kalshi commands with subview/mode flags so analytics can
   // distinguish e.g. "basket build" vs "basket backtest", or thematic vs
   // behavioral clusters. Outer command name is always tracked.
@@ -555,7 +596,7 @@ export async function executePendingTrade(trade: NonNullable<CommandResult['pend
   // Auto-file a falsifiable hypothesis for the position: the side that
   // profits is the predicted settlement. Settlement sync resolves it.
   try {
-    const predicted = (trade.action === 'buy') === (trade.side === 'yes') ? 'yes' : 'no';
+    const predicted = winningSide(trade.action, trade.side);
     addHypothesis(getDb(), {
       claim: `Model-backed ${trade.action.toUpperCase()} ${trade.side.toUpperCase()} x${trade.count} on ${trade.ticker} at ${effectivePrice}¢ settles ${predicted.toUpperCase()}`,
       ticker: trade.ticker,

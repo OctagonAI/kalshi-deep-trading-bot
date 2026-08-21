@@ -49,3 +49,31 @@ describe('paper ledger lifecycle', () => {
     expect(paperSummary(db).open).toBe(1);
   });
 });
+
+// ─── Short economics (review round) ─────────────────────────────────────────
+import { describe as ds, expect as es, test as ts2 } from 'bun:test';
+import { capitalAtRisk } from '../paper';
+
+ds('paper short economics', () => {
+  ts2('seller keeps premium on win, pays complement on loss', () => {
+    // Sell 10 YES @ 60¢: win (settles NO) → +$6.00; lose (settles YES) → -$4.00
+    const p = { action: 'sell' as const, side: 'yes' as const, count: 10, entry_price: 60 };
+    expect(settlePnl(p, 'no')).toBeCloseTo(6);
+    expect(settlePnl(p, 'yes')).toBeCloseTo(-4);
+  });
+
+  ts2('capital at risk mirrors: buyer stakes price, seller stakes complement', () => {
+    expect(capitalAtRisk({ action: 'buy', count: 10, entry_price: 60 })).toBeCloseTo(6);
+    expect(capitalAtRisk({ action: 'sell', count: 10, entry_price: 60 })).toBeCloseTo(4);
+  });
+
+  ts2('settled sell flows into summary with short capital', async () => {
+    const db = freshDb();
+    openPaperPosition(db, { ticker: 'KX-S', action: 'sell', side: 'yes', count: 10, priceCents: 60 });
+    await settlePaperPositions(db, async () => 'no');
+    const s = paperSummary(db);
+    expect(s.realized_pnl).toBeCloseTo(6);
+    expect(s.capital_settled).toBeCloseTo(4);
+    expect(s.roi).toBeCloseTo(1.5);
+  });
+});
