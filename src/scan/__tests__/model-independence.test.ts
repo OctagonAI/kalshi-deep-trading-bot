@@ -87,3 +87,30 @@ describe('formatIndependenceNote', () => {
     expect(apiServesProvenance()).toBe(false);
   });
 });
+
+describe('a known source without a grade', () => {
+  test('is not reported as missing provenance', () => {
+    // Live prod shape: settled rungs come back `recalibrated` with a null grade
+    // because they were never researched. Calling that "provenance unavailable"
+    // is false -- the source is present and says the value came from the model.
+    __setProvenanceSeen(true);
+    const p = { model_probability_source: 'recalibrated', evidence_grade: null };
+    expect(classifyIndependence(p)).toBe('ungraded');
+    const note = formatIndependenceNote(9, p);
+    expect(note).not.toBeNull();
+    expect(note).not.toContain('provenance unavailable');
+    expect(note).toContain('unbounded by evidence');
+  });
+
+  test('still reports genuinely absent provenance as unavailable', () => {
+    __setProvenanceSeen(true);
+    const note = formatIndependenceNote(9, { model_probability_source: null, evidence_grade: null });
+    expect(note).toContain('provenance unavailable');
+  });
+
+  test('does not override a mechanical source that has no grade', () => {
+    // market_baseline never carries a grade; it must stay mechanical, which is
+    // the stronger and more actionable statement.
+    expect(classifyIndependence({ model_probability_source: 'market_baseline', evidence_grade: null })).toBe('mechanical');
+  });
+});

@@ -17,7 +17,7 @@
  * marks which signals are worth acting on.
  */
 
-export type IndependenceLevel = 'independent' | 'bounded' | 'mechanical' | 'unknown';
+export type IndependenceLevel = 'independent' | 'bounded' | 'mechanical' | 'ungraded' | 'unknown';
 
 export interface ModelProvenance {
   model_probability_source?: string | null;
@@ -77,6 +77,12 @@ export function classifyIndependence(p: ModelProvenance | null | undefined): Ind
 
   if (source && MECHANICAL_SOURCES.has(source)) return 'mechanical';
   if (!source && !grade) return 'unknown';
+  // A known model-derived source with no grade is not missing provenance. The
+  // API omits the grade on rows it did not research -- settled rungs quoted at
+  // 100 are the common case -- and reporting those as "provenance unavailable"
+  // is simply false: the source is present and says the value came from the
+  // model. What is unknown is the cap, not the origin.
+  if (source && !grade) return 'ungraded';
   // A low grade bounds the model to within a few points of the anchor, so the
   // "edge" it can express is mostly the debias curve, not research.
   if (grade === 'C' || grade === 'D') return 'bounded';
@@ -119,6 +125,11 @@ export function formatIndependenceNote(
       `  ⚠ Edge is weakly independent: evidence grade ${grade} caps the model at ±${cap}pp from the market-derived anchor` +
       (over ? `, yet the reported edge is ${Math.abs(edgePp!).toFixed(1)}pp — the excess comes from the debias curve, not research.` : '.')
     );
+  }
+  if (level === 'ungraded') {
+    // Deliberately quieter than the bounded note: with no grade there is no cap
+    // to quote, so the only honest statement is that the bound is unknown.
+    return `  ⚠ Edge is unbounded by evidence: source "${source}" carries no grade, so how far research was permitted to move this value is unknown.`;
   }
   if (level === 'unknown') {
     // Silent until this deployment is known to serve the fields at all --
