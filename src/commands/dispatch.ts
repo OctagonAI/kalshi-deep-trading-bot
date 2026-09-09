@@ -36,6 +36,15 @@ import { formatMarketSearchHuman, formatMarketsWithEdgeHuman } from './search-re
 import { handleEvents, formatEventsHuman } from './events.js';
 import { handleTrust, formatTrustHuman } from './trust.js';
 import { handleReport, formatReportHuman } from './report.js';
+import { handleOctagonChat } from './octagon-chat.js';
+import { computeCalibration, formatCalibrationHuman } from '../eval/calibration.js';
+import { generateMissingLessons, getRecentLessons } from '../eval/reflection.js';
+import { makeReflectionLlm } from './index.js';
+import { executeSlashCommand } from './index.js';
+import { syncSettlements } from '../tools/kalshi/settle.js';
+import { getDb } from '../db/index.js';
+import { getBotSetting } from '../utils/bot-config.js';
+import { buildV2Order, placeOrderV2, cancelOrderV2 } from '../tools/kalshi/orders-v2.js';
 import { handleSeries, formatSeriesHuman } from './series.js';
 import { handleEditorialThemes, formatEditorialThemesHuman } from './editorial-themes.js';
 import { handleCatalysts, formatCatalystsHuman } from './catalysts.js';
@@ -501,7 +510,141 @@ export async function dispatch(args: ParsedArgs): Promise<void> {
       return;
     }
 
-    // ─── report (full Octagon markdown report) ─────────────────────────
+    // ─── variants (strategy-variant leaderboard) ──────────────────────
+    if (resolved.canonical === 'variants') {
+      const { computeVariantLeaderboard, formatVariantLeaderboard } = await import('../backtest/variants.js');
+      const resp = await handleBacktest({ ...args, subcommand: 'backtest' });
+      if (!resp.ok) {
+        console.error(resp.error?.message ?? 'variants failed');
+        process.exit(ExitCode.USER_ERROR);
+        return;
+      }
+      const minEdgePp = (args.minEdge ?? 0.005) * 100;
+      const rows = computeVariantLeaderboard(resp.data.signals, minEdgePp);
+      if (json) {
+        console.log(JSON.stringify(wrapSuccess('variants', { min_edge_pp: minEdgePp, rows })));
+      } else {
+        console.log(formatVariantLeaderboard(rows, minEdgePp));
+      }
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
+    // ─── daemon (background prefetch/settle maintenance loop) ─────────
+    if (resolved.canonical === 'daemon') {
+      const { runDaemonCycle, formatCycleSummary } = await import('../daemon/loop.js');
+      const { makeReflectionLlm } = await import('./index.js');
+      const db = getDb();
+      const cfg = getBotSetting('daemon.interval_minutes');
+      const intervalMin = typeof cfg === 'number' && Number.isFinite(cfg) && cfg > 0 ? cfg : 15;
+      const once = args.positionalArgs[0]?.toLowerCase() === 'once';
+      console.log(once
+        ? 'Running one maintenance cycle...'
+        : `Maintenance daemon started — cycle every ${intervalMin}m (Ctrl-C to stop).`);
+
+      let stopped = false;
+      process.once('SIGINT', () => { stopped = true; console.log('\nStopping after current cycle...'); });
+
+      for (;;) {
+        const cycle = await runDaemonCycle(db, { reflectionLlm: makeReflectionLlm() });
+        console.log(formatCycleSummary(cycle));
+        if (once || stopped) break;
+        const wakeAt = Date.now() + intervalMin * 60_000;
+        while (Date.now() < wakeAt && !stopped) {
+          await new Promise((r) => setTimeout(r, 1_000));
+        }
+        if (stopped) break;
+      }
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
+    // ─── paper (forward-test ledger) ──────────────────────────────────
+    if (resolved.canonical === 'paper') {
+      const res = await executeSlashCommand('paper', args.positionalArgs);
+      let out = res?.output ?? '';
+      if (res?.asyncFollowUp) out = await res.asyncFollowUp();
+      if (json) {
+        console.log(JSON.stringify(wrapSuccess('paper', { output: out })));
+      } else {
+        console.log(out);
+      }
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
+    // ─── mandate / kill / resume (hard caps + instant halt) ───────────
+    if (resolved.canonical === 'mandate' || resolved.canonical === 'kill' || resolved.canonical === 'resume') {
+      const res = await executeSlashCommand(resolved.canonical, args.positionalArgs);
+      if (json) {
+        console.log(JSON.stringify(wrapSuccess(resolved.canonical, { output: res?.output ?? '' })));
+      } else {
+        console.log(res?.output ?? '');
+      }
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
+    // ─── hypothesis (falsifiable-claim registry) ──────────────────────
+    if (resolved.canonical === 'hypothesis') {
+      // Reuse the slash handler for identical semantics across surfaces.
+      const res = await executeSlashCommand('hypothesis', args.positionalArgs);
+      if (json) {
+        console.log(JSON.stringify(wrapSuccess('hypothesis', { output: res?.output ?? '' })));
+      } else {
+        console.log(res?.output ?? 'hypothesis: no output');
+      }
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
+    // ─── reflect (generate lessons from settled positions) ────────────
+    if (resolved.canonical === 'reflect') {
+      const db = getDb();
+      await syncSettlements(db).catch(() => { /* offline */ });
+      const result = await generateMissingLessons(db, { llm: makeReflectionLlm() });
+      const recent = getRecentLessons(db, 10);
+      if (json) {
+        console.log(JSON.stringify(wrapSuccess('reflect', { ...result, lessons: recent })));
+      } else {
+        console.log(result.generated > 0 ? `Generated ${result.generated} lessons (${result.source}).` : 'No settled positions awaiting reflection.');
+        for (const l of recent) console.log(`  - [${l.settled_time.slice(0, 10)}] ${l.lesson}`);
+      }
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
+    // ─── calibration (realized-outcome Brier / skill report) ──────────
+    if (resolved.canonical === 'calibration') {
+      const db = getDb();
+      await syncSettlements(db).catch(() => { /* offline: render from local ledger */ });
+      const report = computeCalibration(db);
+      if (json) {
+        console.log(JSON.stringify(wrapSuccess('calibration', report)));
+      } else {
+        console.log(formatCalibrationHuman(report));
+      }
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
+    // ─── octagon (conversational Prediction Markets Agent) ────────────
+    if (resolved.canonical === 'octagon') {
+      const res = handleOctagonChat(args.positionalArgs);
+      const answer = 'followUp' in res ? await res.followUp() : null;
+      if (json) {
+        // Single JSON envelope; the interim status line is human-only.
+        console.log(JSON.stringify(wrapSuccess('octagon', { answer: answer ?? res.output })));
+      } else if (answer !== null) {
+        console.log(res.output);
+        console.log(answer);
+      } else {
+        console.log(res.output);
+      }
+      process.exit(ExitCode.SUCCESS);
+      return;
+    }
+
     if (resolved.canonical === 'report') {
       const resp = await handleReport(args);
       if (json) {
@@ -636,22 +779,23 @@ export async function dispatch(args: ParsedArgs): Promise<void> {
         }
         effectivePrice = quoteResult.cents;
       }
-      const body: Record<string, unknown> = {
-        ticker: ticker.toUpperCase(),
-        action: subcommand,
-        side: tradeSide,
-        type: 'limit',
-        count: validated.count,
-        ...(tradeSide === 'no'
-          ? { no_price: effectivePrice }
-          : { yes_price: effectivePrice }),
-      };
-      const data = await callKalshiApi('POST', '/portfolio/orders', { body });
+      // V2 order path — V1 /portfolio/orders writes return 410 Gone, and the
+      // mandate/kill-switch chokepoint lives inside placeOrderV2.
+      const data = await placeOrderV2(
+        buildV2Order({
+          ticker: ticker.toUpperCase(),
+          action: subcommand as 'buy' | 'sell',
+          side: tradeSide,
+          count: validated.count,
+          priceCents: effectivePrice,
+        })
+      );
       if (json) {
         console.log(JSON.stringify(wrapSuccess(subcommand, data)));
       } else {
-        const order = data.order as Record<string, unknown> | undefined;
-        console.log(order ? `Order placed. ID: ${order.order_id} | Status: ${order.status}` : `Order submitted.`);
+        const filled = parseFloat(String(data.fill_count ?? '0'));
+        const remaining = parseFloat(String(data.remaining_count ?? '0'));
+        console.log(data.order_id ? `Order placed. ID: ${data.order_id} | Filled: ${filled} | Resting: ${remaining}` : `Order submitted.`);
       }
       return;
     }
@@ -671,7 +815,7 @@ export async function dispatch(args: ParsedArgs): Promise<void> {
         return;
       }
       try {
-        await callKalshiApi('DELETE', `/portfolio/orders/${orderId}`);
+        await cancelOrderV2(orderId);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         const hint = msg.includes('404') ? ' (order not found or already filled)' : '';

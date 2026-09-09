@@ -30,7 +30,7 @@ Execute trading actions on Kalshi prediction markets. Routes natural language tr
 ## IMPORTANT
 
 - NEVER call this tool without explicit user confirmation of trade details
-- Always confirm: ticker, side (yes/no), action (buy/sell), count, and price
+- Always confirm: ticker, side (yes/no), action (buy/sell), count — and price for limit orders (market orders need no price)
 - Prices are in cents: $0.56 = 56 cents
 `.trim();
 
@@ -41,10 +41,11 @@ Current date: ${getCurrentDate()}
 Given a trading instruction, call the appropriate trading tool.
 
 ## Key Facts
-- Prices are in cents (1-99): $0.56 → yes_price: 56
+- Prices are in cents (1-99), always quoted on the YES side: $0.56 → yes_price: 56
 - side: "yes" or "no" (the contract type)
 - action: "buy" or "sell"
 - type: "limit" (use yes_price) or "market" (no price needed)
+- To amend, pass order_id plus the order's ticker, action, and side; count is the new total quantity
 - To cancel by order_id, use cancel_order
 - For multiple cancels, use cancel_orders with order_ids array
 

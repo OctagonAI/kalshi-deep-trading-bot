@@ -65,7 +65,9 @@ export async function handleAnalyzeBatch(tickers: string[]): Promise<CLIResponse
 
 export function formatAnalyzeBatchHuman(data: AnalyzeBatchResult): string {
   const lines: string[] = [];
-  lines.push(`Batch analyze — ${data.scored}/${data.data.length} scored in run ${data.run_id.slice(0, 8)} (${data.captured_at.slice(0, 16).replace('T', ' ')})`);
+  const runLabel = data.run_id ? ` in run ${data.run_id.slice(0, 8)}` : '';
+  const timeLabel = data.captured_at ? ` (${data.captured_at.slice(0, 16).replace('T', ' ')})` : '';
+  lines.push(`Batch analyze — ${data.scored}/${data.data.length} scored${runLabel}${timeLabel}`);
   lines.push('');
   if (data.data.length === 0) {
     lines.push('No tickers returned.');

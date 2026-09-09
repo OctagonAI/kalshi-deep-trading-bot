@@ -45,6 +45,7 @@ ${p}portfolio positions          Open positions with P&L
 ${p}portfolio orders             Resting orders
 ${p}portfolio balance            Account balance
 ${p}portfolio status             Exchange status${ctx === 'cli' ? ' and setup verification' : ''}
+${p}portfolio settlements        Realized P&L ledger from settled positions (auto-syncs from Kalshi)
 ${ctx === 'cli' ? `
 Flags:
   --performance                     Include win rate, Sharpe, Brier scores
@@ -248,6 +249,97 @@ Flags:
   --json                        JSON output (matrix + ranked_pairs + cells_detail)
 
 Output ranks pairs ascending by correlation — most-uncorrelated first.`,
+
+    variants: `**${p}variants** — Strategy-variant leaderboard
+
+${p}variants [--days N] [--min-edge N] [--min-volume N] [--resolved]
+
+Runs the backtest signal pipeline once, then scores named segments (NO-only,
+YES-only, edge bands, price bands, confidence, resolved-only) with the same
+definitions — hit rate, capital-weighted ROI, alpha vs always-NO, max
+drawdown, ROI/maxDD — ranked risk-adjusted. Operationalizes the manual
+"how does the strategy do if I only take X" segmentation.`,
+
+    daemon: `**${p}daemon** — Background maintenance loop (CLI only)
+
+kalshi daemon                    Run forever; cycle every daemon.interval_minutes (default 15m)
+kalshi daemon once               Single cycle, then exit
+
+Each cycle: event-index refresh → Octagon events prefetch → settlements
+sync (realized P&L, Brier, hypothesis auto-resolution) → paper-position
+settlement → reflection lessons. Every step is fail-soft. Run it under
+tmux/systemd to keep every cache warm off the critical path.`,
+
+    paper: `**${p}paper** — Paper-trading ledger (forward test, no exchange orders)
+
+${p}paper                         Ledger view; settles resolved positions first
+${p}paper buy <ticker> <n> [price] [yes|no]
+${p}paper sell <ticker> <n> [price] [yes|no]
+
+Entries use the same semantics as ${p}buy (market quote when no price) and
+capture the model's view at entry. Positions settle against real Kalshi
+results and are scored with the backtest's flat-bet definitions, so
+backtest → paper → live is one comparable chain. Paper entries auto-file
+hypotheses (source 'paper').`,
+
+    mandate: `**${p}mandate** — Hard trading caps + kill switch
+
+${p}mandate                       Show caps and kill-switch status
+${p}kill [reason]                 INSTANT HALT — refuse all new orders
+${p}resume                        Lift the kill switch
+
+Caps (per-order contracts, per-order notional, daily realized loss from the
+settlements ledger) are enforced at order placement itself, so every path —
+manual ${p}buy, the trading agent, batch orders — obeys them. Cancels are
+always allowed. Adjust: ${p}config set mandate.max_notional_per_order 250`,
+
+    hypothesis: `**${p}hypothesis** — Falsifiable-claim registry with lifecycle
+
+${p}hypothesis                    Scoreboard + all claims (open first)
+${p}hypothesis add "claim" [--ticker KX... --side yes|no]
+${p}hypothesis list [open|confirmed|refuted]
+${p}hypothesis resolve <id> <confirmed|refuted> [note]
+${p}hypothesis retire <id> [note]
+
+Claims bound to a ticker + side resolve automatically when the market
+settles; executed trades auto-file one per position. The scoreboard's
+resolved hit rate is the honest record of the strategy's claims.`,
+
+    reflect: `**${p}reflect** — Reflection loop over settled positions
+
+${p}reflect                       Generate terse lessons from settlements without one
+
+Each settled position with a model view becomes a one-line falsifiable
+lesson (LLM-written, deterministic fallback). Lessons for a series are
+shown inside ${p}analyze output for markets in that series, closing the
+loop between realized outcomes and the next decision.`,
+
+    calibration: `**${p}calibration** — Model calibration from realized settlements
+
+${p}calibration                   Brier scores, per-category skill, reliability buckets
+
+Measures the model against ground truth: every settled position is scored
+(model probability at entry vs what actually happened) and compared with
+the market price at entry. Skill > 0 means the model out-forecast the
+market. Data accumulates automatically as positions settle.`,
+
+    octagon: `**${p}octagon** — Conversational Octagon Prediction Markets Agent
+
+${p}octagon <question>            Ask anything: discovery, screening, reports
+${p}octagon reset                 Start a new conversation
+
+Multi-turn: follow-ups like "which of those has the best expected return?"
+keep the conversation context — persisted to ~/.kalshi-bot, so one-shot CLI
+invocations keep context across runs too. The agent accepts market URLs,
+tickers, and plain-English descriptions. Use ${p}octagon reset to start over.
+
+Examples:
+  ${p}octagon Where does the model disagree most with market prices in Politics?
+  ${p}octagon Find markets like "Fed cuts rates twice this year"
+  ${p}octagon Show me the 10 most active markets by 24-hour volume
+
+Billing: discovery queries 1 credit; fresh reports 3 credits; cached reports
+and conversational follow-ups free.`,
 
     report: `**${p}report** — Print the full Octagon markdown report for an event
 
@@ -503,6 +595,14 @@ Portfolio construction:
   basket candles --tickers ...  OHLC bars for a weighted basket NAV
 
 Analysis & Trading:
+  octagon <question>            Conversational Octagon agent (multi-turn)
+  calibration                   Brier/skill per category from realized settlements
+  reflect                       Generate lessons from settled positions
+  hypothesis                    Falsifiable-claim registry (auto-filed by trades)
+  paper                         Forward-test ledger (no exchange orders)
+  variants                      Strategy-variant leaderboard (segmented backtest)
+  daemon [once]                 Background maintenance loop (keeps caches warm)
+  mandate · kill · resume       Hard caps + instant trading halt
   analyze <ticker>              Full report: edge, drivers, Kelly sizing
   analyze <ticker> --refresh    Force fresh Octagon report
   buy <ticker> <n> [price] [yes|no]   Buy contracts (price in cents)
@@ -583,6 +683,13 @@ Portfolio construction:
   /basket candles --tickers ...  OHLC bars for a weighted basket NAV
 
 Analysis:
+  /octagon <question>            Conversational Octagon agent (multi-turn)
+  /calibration                   Brier/skill per category from realized settlements
+  /reflect                       Generate lessons from settled positions
+  /hypothesis                    Falsifiable-claim registry (auto-filed by trades)
+  /paper                         Forward-test ledger (no exchange orders)
+  /variants                      Strategy-variant leaderboard (segmented backtest)
+  /mandate · /kill · /resume     Hard caps + instant trading halt
   /backtest                      Model accuracy scorecard + live edge scanner
   /analyze <ticker>              Full report: edge, drivers, Kelly sizing
   /analyze <ticker> refresh      Force fresh Octagon report

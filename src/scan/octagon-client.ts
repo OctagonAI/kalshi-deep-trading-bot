@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { noteProvenanceObserved, type ModelProvenance } from './model-independence.js';
 import type { AuditTrail } from '../audit/trail.js';
 import {
   insertReport,
@@ -214,24 +215,29 @@ export class OctagonClient {
           report = { ...defaults, cacheMiss: true };
           return report;
         }
-        // Check if model probability was actually provided (event-level)
-        const source = (versions?.[0] ?? parsed) as Record<string, unknown>;
-        hasExplicitModelProb = (source.modelProb ?? source.model_prob ?? source.model_probability) != null;
-        report = this.mapJsonToReport(parsed, defaults);
-        // Per-market probability from outcome_probabilities_json also counts as explicit
-        if (report.modelProb !== defaults.modelProb) {
-          hasExplicitModelProb = true;
-        }
+        const mapped = this.mapJsonToReport(parsed, defaults);
+        // Explicitness comes from the mapper: an event-level value OR a
+        // per-outcome match — including an explicit 50% — counts.
+        hasExplicitModelProb = mapped.modelProbExplicit;
+        report = mapped;
       } else {
-        report = this.extractFromMarkdown(raw, defaults);
+        const extracted = this.extractFromMarkdown(raw, defaults);
+        hasExplicitModelProb = extracted.modelProbExtracted;
+        report = extracted;
       }
     } catch {
       // Not JSON — fall through to regex extraction
-      report = this.extractFromMarkdown(raw, defaults);
+      const extracted = this.extractFromMarkdown(raw, defaults);
+      hasExplicitModelProb = extracted.modelProbExtracted;
+      report = extracted;
     }
 
-    // Detect cache miss: no explicit model probability was provided AND no meaningful content
-    if (!hasExplicitModelProb && report.modelProb === defaults.modelProb && report.drivers.length === 0 && report.catalysts.length === 0) {
+    // A model probability that was neither provided nor extracted means the
+    // 0.5 default is a placeholder, not a view. Storing it as a real edge
+    // fabricates up-to-50pp signals (see edge_history rows with model_prob
+    // exactly 0.5 and cache_miss=0), so flag the report as a miss regardless
+    // of whether drivers/catalysts text was present.
+    if (!hasExplicitModelProb && report.modelProb === defaults.modelProb) {
       report.cacheMiss = true;
     }
 
@@ -354,18 +360,22 @@ export class OctagonClient {
 
   // --- Private helpers ---
 
-  private mapJsonToReport(parsed: Record<string, unknown>, defaults: OctagonReport): OctagonReport {
+  private mapJsonToReport(parsed: Record<string, unknown>, defaults: OctagonReport): OctagonReport & { modelProbExplicit: boolean; provenance: ModelProvenance } {
     // Handle nested cache response: { versions: [{ model_probability, market_probability, ... }] }
     const versions = parsed.versions as Array<Record<string, unknown>> | undefined;
     const source = versions?.[0] ?? parsed;
 
     // For multi-outcome events, look up this specific market's probability
-    // from outcome_probabilities_json before falling back to event-level values.
-    // The event-level model_probability is typically the first outcome's value,
-    // not the one for the market we're analyzing.
+    // from the per-outcome breakdown before falling back to event-level
+    // values. The event-level model_probability is typically the first
+    // outcome's value, not the one for the market we're analyzing. The
+    // Reports API envelope carries `outcome_probabilities` (array); older
+    // cached shapes carry `outcome_probabilities_json` (JSON string).
     let modelProb: number | null = null;
     let marketProb: number | null = null;
-    const outcomeJson = (source as Record<string, unknown>).outcome_probabilities_json;
+    let provenance: ModelProvenance | null = null;
+    const src = source as Record<string, unknown>;
+    const outcomeJson = src.outcome_probabilities ?? src.outcome_probabilities_json;
     if (outcomeJson != null) {
       try {
         const outcomes = typeof outcomeJson === 'string'
@@ -377,6 +387,16 @@ export class OctagonClient {
           if (match) {
             modelProb = this.toProbFromJson(match.model_probability);
             marketProb = this.toProbFromJson(match.market_probability);
+            // Provenance travels with the probability: without it a consumer
+            // cannot tell an independent estimate from the market price
+            // re-expressed, and the CLI trades the difference between them.
+            provenance = {
+              model_probability_source: match.model_probability_source ?? null,
+              evidence_grade: match.evidence_grade ?? null,
+            };
+            // Teaches the independence check that this deployment serves the
+            // fields, so a later absence becomes meaningful rather than noise.
+            noteProvenanceObserved(provenance);
           }
         }
       } catch { /* malformed outcome JSON — fall through */ }
@@ -385,11 +405,18 @@ export class OctagonClient {
     // Fall back to event-level values (correct for single-outcome markets).
     // Uses toProbFromJson which always divides by 100, unlike toProb which uses a
     // > 1 heuristic that fails for sub-1% values (e.g. 0.9% stays as 0.9 → 90%).
+    const outcomeExplicit = modelProb !== null;
     modelProb = modelProb ?? this.toProbFromJson(source.modelProb ?? source.model_prob ?? source.model_probability) ?? defaults.modelProb;
     marketProb = marketProb ?? this.toProbFromJson(source.marketProb ?? source.market_prob ?? source.market_probability) ?? defaults.marketProb;
+    const eventExplicit = (source.modelProb ?? source.model_prob ?? source.model_probability) != null;
 
     return {
       ...defaults,
+      modelProbExplicit: outcomeExplicit || eventExplicit,
+      provenance: provenance ?? {
+        model_probability_source: (src.model_probability_source as string | undefined) ?? null,
+        evidence_grade: (src.evidence_grade as string | undefined) ?? null,
+      },
       modelProb,
       marketProb,
       mispricingSignal: this.toSignal(source.mispricingSignal ?? source.mispricing_signal) ?? this.inferSignal(
@@ -398,9 +425,11 @@ export class OctagonClient {
       ) ?? defaults.mispricingSignal,
       drivers: (() => {
         const latestReport = parsed.latest_report as Record<string, unknown> | undefined;
-        const markdownReport = typeof latestReport?.markdown_report === 'string'
-          ? latestReport.markdown_report
-          : null;
+        const markdownReport = typeof parsed.markdown_report === 'string' && parsed.markdown_report
+          ? parsed.markdown_report
+          : typeof latestReport?.markdown_report === 'string'
+            ? latestReport.markdown_report
+            : null;
         const shortAnswer = markdownReport ? this.extractShortAnswer(markdownReport) : null;
         return this.parseDrivers(source.drivers)
           ?? (shortAnswer ? [{ claim: shortAnswer, category: 'economic' as const, impact: 'high' as const }] : null)
@@ -414,7 +443,7 @@ export class OctagonClient {
     };
   }
 
-  private extractFromMarkdown(raw: string, defaults: OctagonReport): OctagonReport {
+  private extractFromMarkdown(raw: string, defaults: OctagonReport): OctagonReport & { modelProbExtracted: boolean } {
     // For multi-outcome reports (World Cup Silver Ball, FOMC ladders, IPO
     // event trees), the per-outcome probabilities live in markdown tables
     // like:
@@ -437,6 +466,7 @@ export class OctagonClient {
       ...defaults,
       modelProb: modelProb ?? defaults.modelProb,
       marketProb: marketProb ?? defaults.marketProb,
+      modelProbExtracted: modelProb !== null,
       mispricingSignal: this.extractSignal(raw) ?? defaults.mispricingSignal,
       drivers: this.extractDrivers(raw),
       catalysts: this.extractCatalysts(raw),

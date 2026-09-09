@@ -30,6 +30,10 @@ export interface OctagonEventEntry {
     outcome_name?: string;
     model_probability: number;
     market_probability: number;
+    /** Provenance of model_probability — see src/scan/model-independence.ts. */
+    model_probability_source?: string | null;
+    /** Evidence quality A-D; bounds how far the model may deviate from the anchor. */
+    evidence_grade?: string | null;
     volume?: number | null;
     volume_24h?: number | null;
   }> | null;

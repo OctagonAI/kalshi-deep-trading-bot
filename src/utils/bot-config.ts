@@ -17,20 +17,31 @@ export interface BotConfig {
     max_positions: number;
     max_per_category: number;
     daily_loss_limit: number;
+    bear_check_min_edge_pp: number;
   };
   octagon: { daily_credit_ceiling: number; price_move_threshold: number };
   alerts: { min_edge: number; channels: string[] };
   watch: { min_interval_minutes: number; ticker_interval_seconds: number };
   gateway: { whatsapp: { enabled: boolean } };
+  daemon: { interval_minutes: number };
+  mandate: {
+    kill_switch: boolean;
+    kill_reason: string;
+    max_contracts_per_order: number;
+    max_notional_per_order: number;
+    max_daily_loss: number;
+  };
 }
 
 const DEFAULTS: BotConfig = {
   scan: { interval: 60, theme: 'top50' },
-  risk: { kelly_multiplier: 0.5, min_edge_threshold: 0.05, max_position_pct: 0.10, max_spread_cents: 5, min_volume_24h: 500, liquidity_haircut: 0.50, liquidity_spread_threshold: 3, liquidity_volume_threshold: 1000, max_drawdown: 0.20, max_positions: 10, max_per_category: 3, daily_loss_limit: 200 },
+  risk: { kelly_multiplier: 0.5, min_edge_threshold: 0.05, max_position_pct: 0.10, max_spread_cents: 5, min_volume_24h: 500, liquidity_haircut: 0.50, liquidity_spread_threshold: 3, liquidity_volume_threshold: 1000, max_drawdown: 0.20, max_positions: 10, max_per_category: 3, daily_loss_limit: 200, bear_check_min_edge_pp: 15 },
   octagon: { daily_credit_ceiling: 100, price_move_threshold: 0.05 },
   alerts: { min_edge: 0.05, channels: ['terminal'] },
   watch: { min_interval_minutes: 15, ticker_interval_seconds: 5 },
   gateway: { whatsapp: { enabled: false } },
+  daemon: { interval_minutes: 15 },
+  mandate: { kill_switch: false, kill_reason: '', max_contracts_per_order: 100, max_notional_per_order: 100, max_daily_loss: 50 },
 };
 
 const CONFIG_PATH = appPath('config.json');
@@ -124,6 +135,11 @@ const NUMERIC_VALIDATORS: Record<string, (v: number) => string | null> = {
   'octagon.price_move_threshold': (v) => v >= 0 && v <= 1 ? null : 'must be between 0 and 1',
   'octagon.daily_credit_ceiling': (v) => v >= 0 ? null : 'must be >= 0',
   'alerts.min_edge': (v) => v >= 0 && v <= 1 ? null : 'must be between 0 and 1',
+  'mandate.max_contracts_per_order': (v) => v > 0 ? null : 'must be > 0',
+  'mandate.max_notional_per_order': (v) => v > 0 ? null : 'must be > 0',
+  'mandate.max_daily_loss': (v) => v > 0 ? null : 'must be > 0',
+  'risk.bear_check_min_edge_pp': (v) => v > 0 ? null : 'must be > 0',
+  'daemon.interval_minutes': (v) => v > 0 ? null : 'must be > 0',
 };
 
 export function setBotSetting(dotKey: string, rawValue: string): { oldValue: unknown; newValue: unknown } {

@@ -140,6 +140,27 @@ Type help for commands, or just ask a question.
 | `trust <event_ticker>` | Trader Trust scorecard — per-market integrity scores (table view) |
 | `trust <event> --market <market>` | Single-market Trader Trust detail card (use `--verbose` for evidence) |
 | `report <ticker>` | Full Octagon markdown report for an event (accepts event/market/series/URL). `--refresh` forces a fresh pull. |
+| `octagon <question>` | Conversational Octagon Prediction Markets Agent — discovery, edge screens, similar markets, reports. Multi-turn: context persists across TUI turns *and* one-shot CLI runs (stored in `~/.kalshi-bot`); `octagon reset` starts a new conversation. Example: `kalshi octagon "top Politics edges"` then `kalshi octagon "pull the report for the first one"` |
+| `portfolio settlements` | Realized P&L ledger — auto-syncs settled positions from Kalshi, joined with the model's view at entry |
+| `calibration` | Brier scores and per-category skill vs the market, from realized settlements (reliability buckets included) |
+| *(edge provenance)* | `analyze` now flags when an edge is **mechanical** — Octagon's model probability is market-anchored, so a `market_baseline` source or a low `evidence_grade` means the "edge" is the debias curve, not a disagreement with the market |
+| `reflect` | Reflection loop — turns each settled position into a terse lesson, re-surfaced inside `analyze` for the same series |
+| `hypothesis` | Falsifiable-claim registry — executed trades auto-file claims, settlements auto-resolve them; add thematic claims manually |
+| `variants [backtest flags]` | Strategy-variant leaderboard — one signal pipeline segmented through named filters (side, edge band, price band, confidence), ranked by ROI/maxDD |
+| `daemon [once]` | Background maintenance loop: index refresh, Octagon prefetch, settlements sync, paper settlement, reflection — keeps caches warm off the critical path |
+| `paper buy/sell ...` / `paper` | Paper-trading ledger — forward-test with real entry quotes and real settlements, zero exchange risk; scored like the backtest |
+| `mandate` / `kill [reason]` / `resume` | Hard trading caps (per-order size/notional, daily realized loss) enforced at order placement, plus an instant halt |
+
+Learning-loop examples:
+
+```bash
+kalshi calibration                       # Brier/skill per category from settled positions
+kalshi reflect                           # turn unsettled→settled outcomes into terse lessons
+kalshi hypothesis add "Fed cuts twice before December"
+kalshi hypothesis add "AOC nomination overpriced" --ticker KXPRESNOMD-28-AOC --side no
+kalshi hypothesis list open              # scoreboard + open claims
+kalshi hypothesis resolve 3 refuted "only one cut happened"
+```
 | `themes` (registry) | Editorial narrative buckets — list/show/import/create/delete/add-series |
 | `themes report` | 25-theme dashboard with SEO + liquidity |
 | `themes audit` | Flag dead themes (high SEO + zero volume) |

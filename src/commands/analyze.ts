@@ -1,4 +1,5 @@
 import { getDb } from '../db/index.js';
+import { buildV2Order, placeOrderV2 } from '../tools/kalshi/orders-v2.js';
 import { formatBoxHeader } from './formatters.js';
 import { insertEdge } from '../db/edge.js';
 import { getLatestReport } from '../db/octagon-cache.js';
@@ -22,6 +23,12 @@ import type { RiskGateResult } from '../risk/gate.js';
 import { formatTable } from './scan-formatters.js';
 
 export interface AnalyzeData {
+  /**
+   * Provenance of modelProb, when the report carried it. Lets a caller tell
+   * an independent estimate from the market price re-expressed before acting
+   * on `edge`. Null on older cached reports.
+   */
+  provenance?: { model_probability_source?: string | null; evidence_grade?: string | null } | null;
   ticker: string;
   eventTicker: string;
   title: string;
@@ -480,6 +487,8 @@ export async function handleAnalyze(
     hasModel,
     hasMarketPrice,
     modelProb: hasModel ? snapshot.modelProb : null,
+    // Carried through so the caller can weight the edge (see model-independence).
+    provenance: (report as { provenance?: unknown }).provenance ?? null,
     marketProb: hasMarketPrice ? marketProb : null,
     edge: canComputeEdge ? snapshot.edge : null,
     edgePp: canComputeEdge ? edgePp : null,
@@ -729,17 +738,18 @@ export async function promptAnalyzeActions(data: AnalyzeData): Promise<void> {
           }
 
           try {
-            const orderPayload: Record<string, unknown> = {
-              ticker: data.ticker,
-              action: 'sell',
-              side: sellSide,
-              type: 'limit',
-              count: sellSize,
-            };
-            if (sellSide === 'yes') orderPayload.yes_price = closePrice;
-            else orderPayload.no_price = closePrice;
-
-            const orderRes = await callKalshiApi('POST', '/portfolio/orders', { body: orderPayload });
+            // V2 order path (V1 writes 410; mandate enforced in placeOrderV2).
+            // closePrice is quoted on the position's own side, matching
+            // buildV2Order's side-relative priceCents contract.
+            const orderRes = await placeOrderV2(
+              buildV2Order({
+                ticker: data.ticker,
+                action: 'sell',
+                side: sellSide,
+                count: sellSize,
+                priceCents: closePrice,
+              })
+            );
             const order = (orderRes.order ?? orderRes) as KalshiOrder;
 
             const db = getDb();
@@ -804,17 +814,16 @@ export async function promptAnalyzeActions(data: AnalyzeData): Promise<void> {
         }
 
         try {
-          const orderPayload: Record<string, unknown> = {
-            ticker: data.ticker,
-            action: 'buy',
-            side,
-            type: 'limit',
-            count: data.kelly.contracts,
-          };
-          if (side === 'yes') orderPayload.yes_price = price;
-          else orderPayload.no_price = price;
-
-          const orderRes = await callKalshiApi('POST', '/portfolio/orders', { body: orderPayload });
+          // V2 order path (V1 writes 410; mandate enforced in placeOrderV2).
+          const orderRes = await placeOrderV2(
+            buildV2Order({
+              ticker: data.ticker,
+              action: 'buy',
+              side,
+              count: data.kelly.contracts,
+              priceCents: price,
+            })
+          );
           const order = (orderRes.order ?? orderRes) as KalshiOrder;
 
           const db = getDb();

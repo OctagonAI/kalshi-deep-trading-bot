@@ -20,7 +20,7 @@ function fmtVol(v: number | null | undefined): string {
   return v.toFixed(0);
 }
 
-function looksLikeTicker(s: string): boolean {
+export function looksLikeTicker(s: string): boolean {
   // Kalshi tickers are uppercase with hyphens, digits, no spaces. Anything with
   // a space or lowercase letter is treated as a free-text query.
   return /^[A-Z0-9._-]+$/i.test(s) && /[A-Z]/i.test(s) && s.includes('-');

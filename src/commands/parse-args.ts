@@ -15,6 +15,22 @@ const SUBCOMMANDS = [
   'trust',
   // Full markdown report viewer
   'report',
+  // Conversational Prediction Markets Agent
+  'octagon',
+  // Realized-outcome calibration report
+  'calibration',
+  // Reflection loop over settled positions
+  'reflect',
+  // Falsifiable-claim registry
+  'hypothesis',
+  // Hard caps + instant halt
+  'mandate', 'kill', 'resume',
+  // Forward-test ledger
+  'paper',
+  // Background maintenance loop
+  'daemon',
+  // Strategy-variant leaderboard
+  'variants',
 ] as const;
 
 export type Subcommand = (typeof SUBCOMMANDS)[number];

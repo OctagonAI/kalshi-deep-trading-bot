@@ -46,6 +46,12 @@ export function formatPeersHuman(result: PeersResult): string {
 function formatPeers(data: ClusterPeersResponse): string {
   const lines: string[] = [];
   const c = data.cluster;
+  if (!c) {
+    return [
+      `${data.market_ticker} is not assigned to a ${data.kind} cluster in the current run.`,
+      'Try `similar <ticker>` for embedding neighbors, or `peers <ticker> --show-cluster` to see both cluster assignments.',
+    ].join('\n');
+  }
   lines.push(`Peers for ${data.market_ticker} (${data.kind} cluster ${c.cluster_id}: "${c.label}", size ${c.size})`);
   if (c.description) lines.push(`  ${c.description}`);
   lines.push('');

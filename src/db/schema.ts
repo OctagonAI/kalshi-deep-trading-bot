@@ -125,6 +125,106 @@ export function migrate(db: Database): void {
       created_at  INTEGER
     );
 
+    CREATE TABLE IF NOT EXISTS settlements (
+      -- Realized outcomes from Kalshi /portfolio/settlements: the ground
+      -- truth the learning loop (calibration, reflection) is built on.
+      -- One row per (ticker, settled_time) — INSERT OR IGNORE keeps syncs
+      -- idempotent.
+      ticker            TEXT NOT NULL,
+      event_ticker      TEXT NOT NULL,
+      market_result     TEXT NOT NULL,
+      yes_count_fp      REAL NOT NULL DEFAULT 0,
+      no_count_fp       REAL NOT NULL DEFAULT 0,
+      yes_total_cost    REAL NOT NULL DEFAULT 0,
+      no_total_cost     REAL NOT NULL DEFAULT 0,
+      revenue           REAL NOT NULL DEFAULT 0,
+      fee_cost          REAL NOT NULL DEFAULT 0,
+      realized_pnl      REAL NOT NULL DEFAULT 0,
+      settled_time      TEXT NOT NULL,
+      -- Model context at entry, joined from edge_history (nullable: we may
+      -- not have scored the market before entering it).
+      model_prob_entry  REAL,
+      market_prob_entry REAL,
+      edge_entry        REAL,
+      raw_json          TEXT,
+      synced_at         INTEGER NOT NULL,
+      PRIMARY KEY (ticker, settled_time)
+    );
+
+    CREATE TABLE IF NOT EXISTS paper_positions (
+      -- Forward-test ledger: same entry semantics as live /buy, no exchange
+      -- order. Settled against real market results, scored with the same
+      -- flat-bet definitions as the backtest so paper vs live vs backtest
+      -- numbers are directly comparable.
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticker        TEXT NOT NULL,
+      event_ticker  TEXT NOT NULL DEFAULT '',
+      action        TEXT NOT NULL CHECK (action IN ('buy', 'sell')),
+      side          TEXT NOT NULL CHECK (side IN ('yes', 'no')),
+      count         REAL NOT NULL,
+      entry_price   REAL NOT NULL,          -- cents, on the chosen side
+      model_prob    REAL,                   -- model view at entry, 0-1
+      market_prob   REAL,
+      edge          REAL,
+      status        TEXT NOT NULL DEFAULT 'open'
+                    CHECK (status IN ('open', 'settled', 'closed')),
+      outcome       TEXT,                   -- 'yes' | 'no' when settled
+      realized_pnl  REAL,
+      opened_at     INTEGER NOT NULL,
+      settled_at    INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_paper_status
+      ON paper_positions(status, opened_at DESC);
+
+    CREATE TABLE IF NOT EXISTS hypotheses (
+      -- Falsifiable-claim registry (Vibe-Trading pattern). Market-bound
+      -- hypotheses (ticker + predicted_side) are auto-resolved by
+      -- settlement sync; thematic ones resolve manually. Every executed
+      -- trade auto-files one, so the book of live claims is always the
+      -- book of live risk.
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      claim          TEXT NOT NULL,
+      category       TEXT NOT NULL DEFAULT '',
+      ticker         TEXT,
+      event_ticker   TEXT,
+      predicted_side TEXT CHECK (predicted_side IN ('yes', 'no') OR predicted_side IS NULL),
+      status         TEXT NOT NULL DEFAULT 'open'
+                     CHECK (status IN ('open', 'confirmed', 'refuted', 'expired', 'retired')),
+      evidence       TEXT,
+      source         TEXT NOT NULL DEFAULT 'manual',
+      created_at     INTEGER NOT NULL,
+      resolved_at    INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hypotheses_status
+      ON hypotheses(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_hypotheses_ticker
+      ON hypotheses(ticker) WHERE ticker IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS lessons (
+      -- Reflection loop: one terse lesson per settled position with a model
+      -- view, generated from the gap between what the model believed at
+      -- entry and what actually happened. Injected into /analyze context
+      -- for markets in the same category.
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticker        TEXT NOT NULL,
+      event_ticker  TEXT NOT NULL,
+      category      TEXT NOT NULL,
+      settled_time  TEXT NOT NULL,
+      model_prob    REAL NOT NULL,
+      market_prob   REAL,
+      outcome       INTEGER NOT NULL,
+      realized_pnl  REAL NOT NULL,
+      lesson        TEXT NOT NULL,
+      source        TEXT NOT NULL DEFAULT 'llm',
+      created_at    INTEGER NOT NULL,
+      UNIQUE (ticker, settled_time)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_lessons_category
+      ON lessons(category, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS brier_scores (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
       ticker          TEXT NOT NULL,

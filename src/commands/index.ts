@@ -1,4 +1,5 @@
 import { callKalshiApi } from '../tools/kalshi/api.js';
+import { buildV2Order, cancelOrderV2, placeOrderV2 } from '../tools/kalshi/orders-v2.js';
 import type { KalshiOrder, KalshiPosition } from '../tools/kalshi/types.js';
 import type { KalshiBalanceResponse } from './formatters.js';
 import {
@@ -42,6 +43,53 @@ import { handleReport, formatReportHuman } from './report.js';
 import { handleSeries, formatSeriesHuman } from './series.js';
 import { handleEditorialThemes, formatEditorialThemesHuman } from './editorial-themes.js';
 import { handleCatalysts, formatCatalystsHuman } from './catalysts.js';
+import { handleOctagonChat } from './octagon-chat.js';
+import { getDb } from '../db/index.js';
+import { syncSettlements } from '../tools/kalshi/settle.js';
+import { getSettlements, summarizeSettlements } from '../db/settlements.js';
+import { computeCalibration, formatCalibrationHuman } from '../eval/calibration.js';
+import { categoryOf } from '../eval/calibration.js';
+import { generateMissingLessons, getLessonsForCategory, getRecentLessons, formatLessonsForContext } from '../eval/reflection.js';
+import { addHypothesis, resolveHypothesis, listHypotheses, scoreboard, formatHypothesesHuman, type HypothesisStatus } from '../db/hypotheses.js';
+import { getMandateStatus, formatMandateHuman, activateKillSwitch, deactivateKillSwitch, MandateViolation } from '../risk/mandate.js';
+import { needsBearCheck, runBearCheck, formatBearCheck, type BearCheckLlm } from '../eval/bear-check.js';
+import { formatIndependenceNote, type ModelProvenance } from '../scan/model-independence.js';
+import { openPaperPosition, settlePaperPositions, listPaperPositions, paperSummary, formatPaperHuman, winningSide } from './paper.js';
+import { computeVariantLeaderboard, formatVariantLeaderboard } from '../backtest/variants.js';
+
+/** Fast-model structured-output wrapper for the bear check. */
+function makeBearCheckLlm(): BearCheckLlm | undefined {
+  try {
+    const provider = resolveProvider(DEFAULT_MODEL);
+    const model = getFastModel(provider.id, DEFAULT_MODEL);
+    return async (prompt, schema) => {
+      const res = await callLlm(prompt, { model, outputSchema: schema });
+      return typeof res.response === 'string' ? JSON.parse(res.response) : res.response;
+    };
+  } catch {
+    return undefined;
+  }
+}
+import { callLlm, getFastModel, DEFAULT_MODEL } from '../model/llm.js';
+import { resolveProvider } from '../providers.js';
+
+/** Fast-model wrapper for reflection; null when no provider key is configured. */
+export function makeReflectionLlm(): ((prompt: string) => Promise<string>) | undefined {
+  try {
+    const provider = resolveProvider(DEFAULT_MODEL);
+    const model = getFastModel(provider.id, DEFAULT_MODEL);
+    return async (prompt: string) => {
+      const res = await callLlm(prompt, {
+        model,
+        systemPrompt: 'You write terse, falsifiable trading lessons. One sentence, max 30 words, no preamble.',
+      });
+      const c = typeof res.response === 'string' ? res.response : String(res.response.content ?? '');
+      return c;
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 export interface CommandResult {
   output: string;
@@ -57,13 +105,72 @@ export interface CommandResult {
   asyncFollowUp?: () => Promise<string>;
 }
 
+/**
+ * Split a command line into tokens, honoring double/single quotes so
+ * multi-word values survive: `--theme "Bitcoin Breakout"` → ['--theme', 'Bitcoin Breakout'].
+ * Unterminated quotes fall back to whitespace splitting of the remainder.
+ */
+export function tokenizeCommand(line: string): string[] {
+  // A token is a run of bare characters and/or quoted segments with no
+  // whitespace between them, so attached values like --theme="Bitcoin
+  // Breakout" stay one token. Double quotes always delimit; single quotes
+  // delimit only at a token boundary or after '=', so apostrophes inside
+  // words (don't, market's) pass through untouched. Unterminated quotes
+  // degrade to bare text.
+  const tokens: string[] = [];
+  let current = '';
+  let started = false;
+  let i = 0;
+
+  const flush = () => {
+    if (started) tokens.push(current);
+    current = '';
+    started = false;
+  };
+
+  while (i < line.length) {
+    const ch = line[i];
+    if (/\s/.test(ch)) {
+      flush();
+      i++;
+      continue;
+    }
+    const atBoundary = !started || current.endsWith('=');
+    if (ch === '"' || (ch === "'" && atBoundary)) {
+      const close = line.indexOf(ch, i + 1);
+      if (close === -1) {
+        // Unterminated: drop the quote char, keep the text.
+        started = true;
+        i++;
+        continue;
+      }
+      current += line.slice(i + 1, close);
+      started = true;
+      i = close + 1;
+      continue;
+    }
+    current += ch;
+    started = true;
+    i++;
+  }
+  flush();
+  return tokens;
+}
+
 export async function handleSlashCommand(input: string): Promise<CommandResult | null> {
   const trimmed = input.trim();
   if (!trimmed.startsWith('/')) return null;
 
-  const parts = trimmed.slice(1).trim().split(/\s+/);
-  const command = parts[0]?.toLowerCase();
-  const args = parts.slice(1);
+  const parts = tokenizeCommand(trimmed.slice(1).trim());
+  return executeSlashCommand(parts[0]?.toLowerCase(), parts.slice(1));
+}
+
+/**
+ * Execute a slash command from pre-tokenized arguments. CLI dispatch calls
+ * this directly with argv tokens so shell-quoted values ("Fed won't cut")
+ * are never flattened and re-tokenized.
+ */
+export async function executeSlashCommand(command: string | undefined, args: string[]): Promise<CommandResult | null> {
   // Enrich Octagon-Kalshi commands with subview/mode flags so analytics can
   // distinguish e.g. "basket build" vs "basket backtest", or thematic vs
   // behavioral clusters. Outer command name is always tracked.
@@ -106,6 +213,8 @@ export async function handleSlashCommand(input: string): Promise<CommandResult |
       return handlePortfolioSlash('positions');
     case 'orders':
       return handlePortfolioSlash('orders');
+    case 'settlements':
+      return handlePortfolioSlash('settlements');
 
     // ─── Trading ─────────────────────────────────────────────────────
     case 'buy':
@@ -133,6 +242,160 @@ export async function handleSlashCommand(input: string): Promise<CommandResult |
           return resp.ok ? formatEditorialThemesHuman(resp.data) : (resp.error?.message ?? 'themes failed');
         },
       };
+    }
+
+    // ─── /variants (strategy-variant leaderboard over backtest signals) ─
+    case 'variants': {
+      // Same flag surface as /backtest — one pipeline, segmented lenses.
+      const vArgs: Partial<ParsedArgs> = { subcommand: 'backtest' };
+      for (let i = 0; i < args.length; i++) {
+        const a = args[i];
+        if (a === '--resolved') vArgs.resolved = true;
+        else if (a === '--unresolved') vArgs.unresolved = true;
+        else if (a === '--category') vArgs.category = args[++i];
+        else if (a === '--days') { const v = Number(args[++i]); if (Number.isFinite(v) && v > 0) vArgs.days = v; }
+        else if (a === '--min-edge') { const v = Number(args[++i]?.replace('%', '')); if (Number.isFinite(v)) vArgs.minEdge = v / 100; }
+        else if (a === '--min-volume') { const v = Number(args[++i]); if (Number.isFinite(v) && v >= 0) vArgs.minVolume = v; }
+      }
+      return {
+        output: 'Scoring signals and segmenting variants (reuses the backtest pipeline)...',
+        asyncFollowUp: async () => {
+          const resp = await handleBacktest(defaultArgs(vArgs));
+          if (!resp.ok) return resp.error?.message ?? 'variants failed';
+          const minEdgePp = (vArgs.minEdge ?? 0.005) * 100;
+          const rows = computeVariantLeaderboard(resp.data.signals, minEdgePp);
+          return formatVariantLeaderboard(rows, minEdgePp);
+        },
+      };
+    }
+
+    // ─── /paper (forward-test ledger — no exchange orders) ──────────
+    case 'paper': {
+      const db = getDb();
+      const sub = args[0]?.toLowerCase();
+      if (sub === 'buy' || sub === 'sell') {
+        // Same argument shape as /buy: <ticker> <count> [price] [yes|no]
+        const [ticker, countStr, ...rest] = args.slice(1);
+        if (!ticker || !countStr) {
+          return { output: `Usage: /paper ${sub} <ticker> <count> [price_in_cents] [yes|no]` };
+        }
+        const side = parseSide(rest.find((r) => parseSide(r) !== null)) ?? 'yes';
+        const priceStr = rest.find((r) => /^\d+$/.test(r));
+        const validation = validateTradeArgs(countStr, priceStr);
+        if ('error' in validation) return { output: validation.error };
+        let entry = validation.price;
+        if (entry === undefined) {
+          const quote = await fetchMarketQuote(ticker.toUpperCase(), sub, side);
+          if ('error' in quote) return { output: quote.error };
+          entry = quote.cents;
+        }
+        const id = openPaperPosition(db, { ticker: ticker.toUpperCase(), action: sub, side, count: validation.count, priceCents: entry });
+        return { output: `Paper position #${id}: ${sub.toUpperCase()} ${side.toUpperCase()} x${validation.count} ${ticker.toUpperCase()} @ ${entry}¢ (no exchange order). Settles automatically when the market resolves.` };
+      }
+      // default: settle pass + view
+      return {
+        output: 'Checking open paper positions for settlements...',
+        asyncFollowUp: async () => {
+          const settled = await settlePaperPositions(db).catch(() => 0);
+          return formatPaperHuman(listPaperPositions(db), paperSummary(db), settled);
+        },
+      };
+    }
+
+    // ─── /mandate /kill /resume (hard caps + instant halt) ──────────
+    case 'mandate':
+      return { output: formatMandateHuman(getMandateStatus()) };
+    case 'kill': {
+      const reason = args.join(' ').trim() || undefined;
+      activateKillSwitch(reason);
+      return { output: `⛔ Kill switch ACTIVE${reason ? ` — ${reason}` : ''}. All new orders will be refused. /resume to lift.` };
+    }
+    case 'resume': {
+      deactivateKillSwitch();
+      return { output: '✓ Kill switch lifted — trading enabled (mandate caps still apply).' };
+    }
+
+    // ─── /hypothesis (falsifiable-claim registry) ───────────────────
+    case 'hypothesis':
+    case 'hypotheses': {
+      const db = getDb();
+      const sub = args[0]?.toLowerCase();
+      if (sub === 'add') {
+        // Flags may come before or after the claim; anything that isn't a
+        // recognized flag (or its value) is claim text.
+        let ticker: string | undefined;
+        let side: 'yes' | 'no' | undefined;
+        const claimParts: string[] = [];
+        for (let i = 1; i < args.length; i++) {
+          if (args[i] === '--ticker') ticker = args[++i]?.toUpperCase();
+          else if (args[i] === '--side') { const v = args[++i]?.toLowerCase(); if (v === 'yes' || v === 'no') side = v; }
+          else claimParts.push(args[i]);
+        }
+        const claim = claimParts.join(' ').trim();
+        if (!claim) return { output: 'Usage: /hypothesis add "claim" [--ticker KX... --side yes|no]' };
+        const id = addHypothesis(db, { claim, ticker, predictedSide: side });
+        return { output: `Hypothesis #${id} registered${ticker ? ` (auto-resolves when ${ticker} settles)` : ''}.` };
+      }
+      if (sub === 'resolve' || sub === 'retire') {
+        const id = Number(args[1]);
+        if (!Number.isInteger(id)) return { output: `Usage: /hypothesis ${sub} <id>${sub === 'resolve' ? ' <confirmed|refuted> [note]' : ' [note]'}` };
+        const status = sub === 'retire' ? 'retired' : (args[2]?.toLowerCase() as 'confirmed' | 'refuted');
+        if (sub === 'resolve' && status !== 'confirmed' && status !== 'refuted') {
+          return { output: 'Usage: /hypothesis resolve <id> <confirmed|refuted> [note]' };
+        }
+        const note = args.slice(sub === 'retire' ? 2 : 3).join(' ') || undefined;
+        const ok = resolveHypothesis(db, id, status, note);
+        return { output: ok ? `Hypothesis #${id} ${status}.` : `Hypothesis #${id} not found or already resolved.` };
+      }
+      // list (default), optional status filter
+      const statusFilter = (sub === 'list' ? args[1] : sub)?.toLowerCase() as HypothesisStatus | undefined;
+      const valid = ['open', 'confirmed', 'refuted', 'expired', 'retired'];
+      const rows = listHypotheses(db, statusFilter && valid.includes(statusFilter) ? statusFilter : undefined);
+      return { output: formatHypothesesHuman(rows, scoreboard(db)) };
+    }
+
+    // ─── /reflect (generate lessons from settled positions) ─────────
+    case 'reflect': {
+      return {
+        output: 'Reflecting on settled positions...',
+        asyncFollowUp: async () => {
+          const db = getDb();
+          await syncSettlements(db).catch(() => { /* offline: use local ledger */ });
+          const result = await generateMissingLessons(db, { llm: makeReflectionLlm() });
+          const recent = getRecentLessons(db, 10);
+          const lines: string[] = [];
+          lines.push(result.generated > 0
+            ? `Generated ${result.generated} lesson${result.generated === 1 ? '' : 's'} (${result.source}).`
+            : 'No settled positions awaiting reflection.');
+          if (recent.length > 0) {
+            lines.push('');
+            lines.push('Recent lessons:');
+            for (const l of recent) lines.push(`  - [${l.settled_time.slice(0, 10)}] ${l.lesson}`);
+          }
+          return lines.join('\n');
+        },
+      };
+    }
+
+    // ─── /calibration (realized-outcome Brier / skill report) ───────
+    case 'calibration': {
+      return {
+        output: 'Computing calibration from settled positions...',
+        asyncFollowUp: async () => {
+          const db = getDb();
+          await syncSettlements(db).catch(() => { /* offline: render from local ledger */ });
+          return formatCalibrationHuman(computeCalibration(db));
+        },
+      };
+    }
+
+    // ─── /octagon (conversational Prediction Markets Agent) ─────────
+    case 'octagon': {
+      const res = handleOctagonChat(args);
+      if ('followUp' in res) {
+        return { output: res.output, asyncFollowUp: res.followUp };
+      }
+      return { output: res.output };
     }
 
     // ─── /analyze ────────────────────────────────────────────────────
@@ -310,22 +573,42 @@ export async function executePendingTrade(trade: NonNullable<CommandResult['pend
     if ('error' in quoteResult) return quoteResult.error;
     effectivePrice = quoteResult.cents;
   }
-  const body: Record<string, unknown> = {
-    ticker: trade.ticker,
-    action: trade.action,
-    side: trade.side,
-    type: 'limit',
-    count: trade.count,
-    ...(trade.side === 'no'
-      ? { no_price: effectivePrice }
-      : { yes_price: effectivePrice }),
-  };
-
-  const data = await callKalshiApi('POST', '/portfolio/orders', { body });
-  const order = data.order as Record<string, unknown> | undefined;
+  // effectivePrice is quoted on the chosen side; buildV2Order maps it onto
+  // the V2 YES-side book (buy NO at p → sell YES at 1 - p).
+  let data;
+  try {
+    data = await placeOrderV2(
+    buildV2Order({
+      ticker: trade.ticker,
+      action: trade.action,
+      side: trade.side,
+      count: trade.count,
+      priceCents: effectivePrice,
+    })
+    );
+  } catch (err) {
+    if (err instanceof MandateViolation) {
+      trackEvent('trade_blocked', { action: trade.action, side: trade.side, reason: 'mandate' });
+      return `⛔ ${err.message}`;
+    }
+    throw err;
+  }
   trackEvent('trade_executed', { action: trade.action, side: trade.side, success: 'true' });
-  if (order) {
-    return `Order placed. ID: ${order.order_id} | Status: ${order.status}`;
+  // Auto-file a falsifiable hypothesis for the position: the side that
+  // profits is the predicted settlement. Settlement sync resolves it.
+  try {
+    const predicted = winningSide(trade.action, trade.side);
+    addHypothesis(getDb(), {
+      claim: `Model-backed ${trade.action.toUpperCase()} ${trade.side.toUpperCase()} x${trade.count} on ${trade.ticker} at ${effectivePrice}¢ settles ${predicted.toUpperCase()}`,
+      ticker: trade.ticker,
+      predictedSide: predicted,
+      source: 'trade',
+    });
+  } catch { /* registry is additive — never block execution */ }
+  if (data.order_id) {
+    const filled = parseFloat(String(data.fill_count ?? '0'));
+    const remaining = parseFloat(String(data.remaining_count ?? '0'));
+    return `Order placed. ID: ${data.order_id} | Filled: ${filled} | Resting: ${remaining}`;
   }
   return `Order submitted. Response: ${JSON.stringify(data)}`;
 }
@@ -344,6 +627,32 @@ async function handlePortfolioSlash(subview?: string): Promise<CommandResult> {
         return pos !== 0;
       });
       return { output: formatPositions(positions) };
+    }
+
+    if (view === 'settlements') {
+      const db = getDb();
+      const sync = await syncSettlements(db);
+      const summary = summarizeSettlements(db);
+      const recent = getSettlements(db, 15);
+      const lines: string[] = [];
+      lines.push('**Settlements (realized P&L)**');
+      lines.push('');
+      lines.push(`Synced: ${sync.new_settlements} new (${sync.fetched} fetched)${sync.positions_closed ? `, ${sync.positions_closed} local positions closed` : ''}${sync.complete ? '' : ' — INCOMPLETE: page cap hit, run again to continue'}`);
+      lines.push(`Lifetime: ${summary.count} settlements · realized P&L ${summary.total_realized_pnl >= 0 ? '+' : ''}$${summary.total_realized_pnl.toFixed(2)} · fees $${summary.total_fees.toFixed(2)} · ${summary.wins}W/${summary.losses}L`);
+      if (summary.with_model_view > 0) {
+        lines.push(`Model-side outcome: ${summary.model_side_wins}/${summary.with_model_view} settlements went the model's way`);
+      }
+      if (recent.length > 0) {
+        lines.push('');
+        for (const r of recent) {
+          const model = r.model_prob_entry !== null ? ` model=${(r.model_prob_entry * 100).toFixed(0)}%` : '';
+          lines.push(`  ${r.settled_time.slice(0, 10)}  ${r.ticker}  ${r.market_result.toUpperCase()}  ${r.realized_pnl >= 0 ? '+' : ''}$${r.realized_pnl.toFixed(2)}${model}`);
+        }
+      } else {
+        lines.push('');
+        lines.push('No settlements recorded yet.');
+      }
+      return { output: lines.join('\n') };
     }
 
     if (view === 'orders') {
@@ -374,11 +683,65 @@ async function handlePortfolioSlash(subview?: string): Promise<CommandResult> {
 
 async function handleAnalyzeCommand(args: string[]): Promise<CommandResult> {
   const ticker = args[0];
-  if (!ticker) return { output: 'Usage: /analyze <ticker> [refresh]' };
+  if (!ticker) return { output: 'Usage: /analyze <ticker> [refresh]  |  /analyze <t1> <t2> [t3...]' };
+  // Multiple tickers → batch edge readout (one Octagon call for all).
+  const nonFlag = args.filter((a) => !a.startsWith('--') && a.toLowerCase() !== 'refresh');
+  if (nonFlag.length > 1) {
+    return {
+      output: `Batch-analyzing ${nonFlag.length} tickers...`,
+      asyncFollowUp: async () => {
+        const { handleAnalyzeBatch, formatAnalyzeBatchHuman } = await import('./analyze-batch.js');
+        const resp = await handleAnalyzeBatch(nonFlag.map((t) => t.toUpperCase()));
+        return resp.ok ? formatAnalyzeBatchHuman(resp.data) : (resp.error?.message ?? 'analyze (batch) failed');
+      },
+    };
+  }
   const refresh = args[1]?.toLowerCase() === 'refresh';
   try {
     const data = await handleAnalyze(ticker.toUpperCase(), refresh);
-    return { output: formatAnalyzeHuman(data) };
+    let output = formatAnalyzeHuman(data);
+    // Reflection loop: surface lessons from settled positions in the same
+    // series next to the fresh analysis, so realized errors inform the
+    // next decision instead of being forgotten.
+    let lessonTexts: string[] = [];
+    try {
+      const lessons = getLessonsForCategory(getDb(), categoryOf(data.eventTicker ?? '', ticker.toUpperCase()));
+      lessonTexts = lessons.map((l) => l.lesson);
+      const block = formatLessonsForContext(lessons);
+      if (block) output += `\n\n${block}`;
+    } catch { /* lessons are additive — never break analyze */ }
+
+    // Provenance: an edge computed against a market-anchored model is not a
+    // disagreement with the market. Say so before anyone acts on it.
+    try {
+      const note = formatIndependenceNote(
+        data.edge !== null ? data.edge * 100 : null,
+        (data as { provenance?: ModelProvenance }).provenance ?? null,
+      );
+      if (note) output += `\n\n${note}`;
+    } catch { /* advisory only */ }
+
+    // Adversarial bear-check: extreme edges get a skeptic pass appended.
+    const edgePp = data.edge !== null && data.modelProb !== null ? data.edge * 100 : null;
+    if (edgePp !== null && needsBearCheck(edgePp)) {
+      return {
+        output,
+        asyncFollowUp: async () => {
+          const llm = makeBearCheckLlm();
+          const result = await runBearCheck({
+            ticker: data.ticker,
+            title: data.title,
+            modelProb: data.modelProb!,
+            marketProb: data.marketProb ?? 0.5,
+            edgePp,
+            keyDrivers: (data.drivers ?? []).slice(0, 5).map((d: { claim: string }) => d.claim),
+            lessons: lessonTexts,
+          }, llm);
+          return formatBearCheck(result, edgePp);
+        },
+      };
+    }
+    return { output };
   } catch (err) {
     return { output: `Analyze failed: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -444,11 +807,12 @@ async function handleCancel(orderId: string | undefined): Promise<CommandResult>
   if (!orderId) return { output: 'Usage: /cancel <order_id>' };
 
   try {
-    await callKalshiApi('DELETE', `/portfolio/orders/${orderId}`);
+    const res = await cancelOrderV2(orderId);
+    const reduced = res.reduced_by !== undefined ? ` (${res.reduced_by} contracts canceled)` : '';
+    return { output: `Order ${orderId} canceled.${reduced}` };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const hint = msg.includes('404') ? ' (order not found or already filled)' : '';
     return { output: `Cancel failed: ${msg}${hint}` };
   }
-  return { output: `Order ${orderId} canceled.` };
 }

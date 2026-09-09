@@ -1,6 +1,8 @@
 import { callKalshiApi, KalshiApiError } from '../tools/kalshi/api.js';
 import { logger } from '../utils/logger.js';
 import type { OctagonInvoker, OctagonVariant } from './types.js';
+import { fetchReportVersions, generateReportAndWait, OctagonReportsApiError } from './octagon-reports-api.js';
+import { looksLikeTicker } from '../commands/similar.js';
 
 /**
  * Slugify a title for Kalshi website URL paths.
@@ -54,7 +56,7 @@ async function buildKalshiMarketUrl(ticker: string): Promise<string> {
 /**
  * Extract text content from an OpenAI-compatible responses API result.
  */
-function extractTextFromResponse(data: unknown): string {
+export function extractTextFromResponse(data: unknown): string {
   if (!data || typeof data !== 'object') return String(data);
 
   const obj = data as Record<string, unknown>;
@@ -97,27 +99,86 @@ function extractTextFromResponse(data: unknown): string {
 }
 
 /**
- * Call the Octagon API with a Kalshi market URL or ticker.
- * Octagon only accepts full Kalshi URLs (e.g. https://kalshi.com/markets/series/event/ticker).
- * If a ticker is passed, it will be resolved to a URL via the Kalshi API.
+ * Resolve any accepted input (kalshi.com URL, market ticker, or event ticker)
+ * to the event ticker the Reports API is addressed by.
+ */
+export async function resolveEventTicker(input: string): Promise<string> {
+  let candidate = input;
+  if (input.startsWith('https://kalshi.com/')) {
+    // URL formats end in an event ticker, a market ticker (tool-built URLs),
+    // or a series slug — extract the last segment and resolve it below like
+    // any bare ticker, so market-ticker URLs land on the parent event.
+    const last = input.split('?')[0].split('/').filter(Boolean).pop();
+    if (!last) throw new Error(`Could not extract an event ticker from URL: ${input}`);
+    candidate = last;
+  }
+  const ticker = candidate.toUpperCase();
+  try {
+    const market = await callKalshiApi('GET', `/markets/${ticker}`);
+    const data = ((market as any).market ?? market) as Record<string, unknown>;
+    if (typeof data.event_ticker === 'string') return data.event_ticker;
+  } catch (err) {
+    if (!(err instanceof KalshiApiError && err.statusCode === 404)) throw err;
+    // Not a market ticker — assume it's already an event ticker.
+  }
+  return ticker;
+}
+
+/**
+ * Call Octagon for a report or a conversational query.
+ *
+ * - 'cache' and 'refresh' use the Reports API (/predictions/reports/kalshi):
+ *   cache pulls ?version=latest, refresh POSTs a generation run and polls it.
+ *   A cache miss returns the JSON envelope '{"versions": []}' so downstream
+ *   cache-miss detection keeps working.
+ * - 'default' sends the input to the conversational Prediction Markets Agent
+ *   over the OpenAI-compatible /responses endpoint.
  */
 export async function callOctagon(input: string, variant: OctagonVariant): Promise<string> {
+  if (variant === 'cache' || variant === 'refresh') {
+    const eventTicker = await resolveEventTicker(input);
+    // Return the full Reports API envelope (versions metadata + markdown_report)
+    // rather than the bare markdown: the structured model_probability /
+    // outcome_probabilities are what downstream parseReport extracts real
+    // probabilities from — markdown regex extraction is the fallback that
+    // produced 0.5-placeholder edges.
+    if (variant === 'cache') {
+      try {
+        const res = await fetchReportVersions(eventTicker, { version: 'latest' });
+        if (res.markdown_report) return JSON.stringify(res);
+        return JSON.stringify({ versions: res.versions ?? [] });
+      } catch (err) {
+        // An unknown event is a cache MISS, not an error — the legacy :cache
+        // variant guaranteed the empty-versions envelope, and scan/analyze
+        // key their miss-triggered refresh logic off it.
+        if (err instanceof OctagonReportsApiError && err.statusCode === 404) {
+          return JSON.stringify({ versions: [] });
+        }
+        throw err;
+      }
+    }
+    const { envelope } = await generateReportAndWait(eventTicker, {
+      onProgress: (msg) => logger.info(`[octagon] ${msg}`),
+    });
+    return JSON.stringify(envelope);
+  }
+
   const apiKey = process.env.OCTAGON_API_KEY;
   const baseUrl = process.env.OCTAGON_BASE_URL ?? 'https://api.octagonai.co/v1';
 
   if (!apiKey) throw new Error('OCTAGON_API_KEY not set. Get one at https://app.octagonai.co');
 
-  const model = variant === 'default'
-    ? 'octagon-prediction-markets-agent'
-    : `octagon-prediction-markets-agent:${variant}`;
+  const model = 'octagon-prediction-markets-agent';
 
-  // Octagon requires a full Kalshi URL — resolve tickers to URLs
-  const marketUrl = input.startsWith('https://kalshi.com/')
+  // The conversational agent accepts URLs, tickers, and natural language —
+  // pass free text through, but canonicalize bare market tickers to URLs.
+  // Uses the strict ticker shape (hyphenated, e.g. KXFED-26SEP-T3) so a
+  // single conversational word like "Explain" is never treated as a ticker.
+  const marketUrl = input.startsWith('https://kalshi.com/') || !looksLikeTicker(input.trim())
     ? input
-    : await buildKalshiMarketUrl(input);
+    : await buildKalshiMarketUrl(input.trim());
 
-  // Refresh reports can take several minutes to generate; cache is fast
-  const timeoutMs = variant === 'cache' ? 60_000 : 600_000;
+  const timeoutMs = 600_000;
   const reqBody = JSON.stringify({ model, input: marketUrl });
   const MAX_RETRIES = 3;
   const RETRY_DELAYS = [15_000, 30_000, 60_000]; // 15s, 30s, 60s
@@ -150,8 +211,7 @@ export async function callOctagon(input: string, variant: OctagonVariant): Promi
       if (err instanceof DOMException && err.name === 'AbortError') {
         const secs = Math.round(timeoutMs / 1000);
         throw new Error(
-          `Octagon API timed out after ${secs}s. The ${variant} report is taking longer than expected. ` +
-          `Try again later or use cached data (omit --refresh).`
+          `Octagon API timed out after ${secs}s. The agent is taking longer than expected. Try again later.`
         );
       }
       throw err;
