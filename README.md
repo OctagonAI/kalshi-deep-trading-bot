@@ -137,7 +137,7 @@ Type help for commands, or just ask a question.
 | `series` / `series <ticker>` | Kalshi series rollup (24h vol, market count) |
 | `series candles <ticker>` | Series-level NAV (basket of top sub-markets) |
 | `catalysts upcoming --days N` | Markets closing in the next N days, grouped by week |
-| `trust <event_ticker>` | Trader Trust scorecard — per-market integrity scores (table view) |
+| `trust <event_ticker>` | Octagon Trust Index — overall score, how Integrity and Trade quality add up, and the trust profile. `--verbose` adds per-contract market quality |
 | `trust <event> --market <market>` | Single-market Trader Trust detail card (use `--verbose` for evidence) |
 | `report <ticker>` | Full Octagon markdown report for an event (accepts event/market/series/URL). `--refresh` forces a fresh pull. |
 | `octagon <question>` | Conversational Octagon Prediction Markets Agent — discovery, edge screens, similar markets, reports. Multi-turn: context persists across TUI turns *and* one-shot CLI runs (stored in `~/.kalshi-bot`); `octagon reset` starts a new conversation. Example: `kalshi octagon "top Politics edges"` then `kalshi octagon "pull the report for the first one"` |

@@ -364,26 +364,32 @@ analysis_last_updated when available — so you can decide whether to --refresh.
 Error paths (missing ticker, event not found, no report body yet) print just
 the error message instead.`,
 
-    trust: `**${p}trust** — Trader Trust scorecard (market-integrity metrics)
+    trust: `**${p}trust** — Octagon Trust Index for an event
 
-${p}trust <event_ticker>                       Table across all markets in the event
+${p}trust <event_ticker>                       Trust Index (overall score + profile)
+${p}trust <event_ticker> --verbose             …plus per-contract market quality
 ${p}trust <event_ticker> --market <market>     Single-market detail card
 ${p}trust <event_ticker> --market <market> --verbose
                                             Include raw evidence + confidence
 
-Four per-market scores (each 0-100, higher = better), produced by Octagon's
-deterministic Trader Trust calculation (trader_dashboard_lean_v1.14):
+The Trust Index (0-100, higher = better) combines two axes:
 
-  market_quality      Overall composite
-  liquidity           Realized trading cost and 24h activity
-  move_quality        Whether recent price moves are volume-confirmed
-  resolution_clarity  Objective outcome, official source, time boundary
+  Integrity      Market integrity, info fairness, resolution quality
+  Trade quality  Cost to trade, including whether a $1,000 order can fill
 
-The table header also shows the event-level quality score.
+It is a weighted blend with hard caps: a critically weak safety pillar, or a
+severe trading anomaly, caps the total regardless of the rest. The trust
+profile breaks out the three integrity pillars and the event's liquidity,
+move quality and rule clarity.
+
+The --market detail card shows four per-market scores (each 0-100, higher =
+better): market_quality (composite), liquidity, move_quality and
+resolution_clarity.
 
 Flags:
   --market <ticker>   Drill into one market in the event
-  --verbose           Show evidence (raw metrics) and confidence
+  --verbose           Add per-contract market quality to the Trust Index; with
+                      --market, show evidence (raw metrics) and confidence
   --json              JSON envelope output
 
 Notes:
