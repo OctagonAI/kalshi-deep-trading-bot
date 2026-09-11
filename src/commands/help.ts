@@ -369,30 +369,29 @@ the error message instead.`,
 ${p}trust <event_ticker>                       Table across all markets in the event
 ${p}trust <event_ticker> --market <market>     Single-market detail card
 ${p}trust <event_ticker> --market <market> --verbose
-                                            Include raw evidence + confidence/freshness
+                                            Include raw evidence + confidence
 
-Six per-market scores (each 0-100), produced by Octagon's deterministic
-Trader Trust calculation:
+Four per-market scores (each 0-100, higher = better), produced by Octagon's
+deterministic Trader Trust calculation (trader_dashboard_lean_v1.14):
 
-  trader_trust       Overall composite                      (higher = better)
-  liquidity_quality  Depth/spread/fill behavior             (higher = better)
-  move_quality       Price-move plausibility                (higher = better)
-  resolution_risk    Resolution clarity (higher = clearer)  (higher = better)
-  market_avoid       Avoidance signal                       (higher = WORSE)
-  quote_risk         Quote-side risk                        (higher = WORSE)
+  market_quality      Overall composite
+  liquidity           Realized trading cost and 24h activity
+  move_quality        Whether recent price moves are volume-confirmed
+  resolution_clarity  Objective outcome, official source, time boundary
+
+The table header also shows the event-level quality score.
 
 Flags:
   --market <ticker>   Drill into one market in the event
-  --verbose           Show evidence (raw metrics), confidence, data freshness
+  --verbose           Show evidence (raw metrics) and confidence
   --json              JSON envelope output
 
 Notes:
   - When trader_trust_json is null (older reports), prints "no trust scorecard for
     this event yet" — not an error.
-  - Higher-is-better vs. higher-is-worse semantics differ per score; tables and
-    detail views color and annotate accordingly.
-  - "(as of report time)" is shown for scores whose data_freshness is
-    point_in_time (e.g. quote_risk, liquidity_quality on snapshot reports).`,
+  - A score can be unscored (not applicable, or insufficient data); it renders
+    as "—", never as 0.
+  - Detail cards show fair value, bid/ask and spread in cents.`,
 
     events: `**${p}events** — Octagon event rollups (event ↔ outcome ladder)
 

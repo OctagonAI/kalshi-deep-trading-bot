@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import type { ParsedArgs } from '../parse-args.js';
 import { handleTrust, formatTrustHuman, type TraderTrustCard, type TrustResult } from '../trust.js';
 import type { CLIResponse } from '../json.js';
@@ -18,48 +19,56 @@ function makeArgs(o: Partial<ParsedArgs>): ParsedArgs {
 }
 
 function makeCard(overrides?: Partial<TraderTrustCard>): TraderTrustCard {
-  const score = (value: number) => ({
+  const score = (value: number | null) => ({
     value,
-    label: value >= 70 ? 'High' : value >= 40 ? 'Moderate' : 'Low',
-    drivers: [
-      { name: 'depth_score', sub_score: value, points: 12.5 },
-      { name: 'spread_pp', sub_score: value - 5, points: 7.3 },
-      { name: 'fill_consistency', sub_score: value - 10, points: 4.2 },
+    label: value === null ? 'No trading in 7d' : value >= 70 ? 'Tradeable' : value >= 40 ? 'Thin' : 'Very thin',
+    drivers: ['24h traded notional $4,090', 'Typical bar range 1.8% of price', 'All checks pass'],
+    evidence: [
+      { text: 'avg spread', metric: 'avg_spread_cents', value: 1.2, window: '24h' },
+      { text: 'Light trading: under $2,000 in 24h' },
     ],
-    evidence: [{ metric: 'avg_spread_cents', value: 1.2 }],
     confidence: 'high' as const,
-    data_freshness: 'point_in_time' as const,
+    suppressed: false,
+    not_applicable: value === null,
   });
   return {
-    calculation_version: 'trust_dashboard_v1.0',
+    calculation_version: 'trader_dashboard_lean_v1.14',
     computed_at: '2026-06-22T15:30:00Z',
     event_ticker: 'KX-EVT',
-    rollup: { median_trader_trust: 70, min_trader_trust: 55, markets_scored: 3 },
+    venue: 'kalshi',
+    event: { event_quality: { value: 70, label: 'Healthy', confidence: 'high' }, structure: 'ladder', coverage: 100 },
+    scope: { total_markets: 3, scored_markets: 2 },
     markets: [
       {
         market_ticker: 'KX-EVT-A',
         title: 'France',
         is_primary: true,
+        lifecycle_status: 'active',
+        fair_cents: 53,
+        best_bid_cents: 52,
+        best_ask_cents: 53,
+        spread_cents: 1,
         scores: {
-          trader_trust: score(85),
-          liquidity_quality: score(80),
+          market_quality: score(85),
+          liquidity: score(80),
           move_quality: score(75),
-          market_avoid: score(15),
-          quote_risk: score(20),
-          resolution_risk: score(90),
+          resolution_clarity: score(90),
         },
       },
       {
         market_ticker: 'KX-EVT-B',
         title: 'Brazil',
         is_primary: false,
+        lifecycle_status: 'active',
+        fair_cents: 21.24,
+        best_bid_cents: 20,
+        best_ask_cents: 22,
+        spread_cents: 2,
         scores: {
-          trader_trust: score(55),
-          liquidity_quality: score(50),
-          move_quality: score(60),
-          market_avoid: score(30),
-          quote_risk: score(40),
-          resolution_risk: score(70),
+          market_quality: score(55),
+          liquidity: score(50),
+          move_quality: score(null),
+          resolution_clarity: score(70),
         },
       },
     ],
@@ -188,29 +197,30 @@ describe('handleTrust', () => {
 });
 
 describe('formatTrustHuman', () => {
-  test('table view contains rollup, header, both markets, and legend', () => {
+  test('table view contains event roll-up, header, both markets, and legend', () => {
     const card = makeCard();
     const result: TrustResult = { kind: 'table', card, event_name: 'Test event' };
     const out = formatTrustHuman(result);
     expect(out).toContain('Trader Trust scorecard for KX-EVT');
     expect(out).toContain('Test event');
-    expect(out).toContain('Median trust 70');
-    expect(out).toContain('trust_dashboard_v1.0');
+    // Roll-up comes from event.event_quality + scope, not a rollup object
+    expect(out).toContain('Event quality 70 (Healthy)');
+    expect(out).toContain('2/3 markets scored');
+    expect(out).toContain('trader_dashboard_lean_v1.14');
     expect(out).toContain('KX-EVT-A');
     expect(out).toContain('KX-EVT-B');
     expect(out).toContain('France');
     expect(out).toContain('Brazil');
     // is_primary mark
     expect(out).toContain('*');
-    // Legend mentions both directions of "good"
-    expect(out).toMatch(/Higher is (better|worse)/i);
+    expect(out).toMatch(/Higher is better/i);
   });
 
-  test('table sorted by liquidity_quality desc', () => {
+  test('table sorted by liquidity desc', () => {
     const card = makeCard();
     // Make B have higher liquidity than A
-    card.markets[0].scores.liquidity_quality.value = 30;
-    card.markets[1].scores.liquidity_quality.value = 90;
+    card.markets[0].scores.liquidity.value = 30;
+    card.markets[1].scores.liquidity.value = 90;
     const out = formatTrustHuman({ kind: 'table', card, event_name: null });
     const aIdx = out.indexOf('KX-EVT-A');
     const bIdx = out.indexOf('KX-EVT-B');
@@ -218,36 +228,68 @@ describe('formatTrustHuman', () => {
     expect(bIdx).toBeLessThan(aIdx);
   });
 
-  test('detail view shows each score with label and top drivers', () => {
+  test('a null score renders as em dash, never as zero', () => {
+    const card = makeCard();
+    const out = formatTrustHuman({ kind: 'detail', card, market: card.markets[1], verbose: false });
+    expect(out).toContain('—');
+    expect(out).toContain('not applicable');
+    expect(out).not.toMatch(/Move.*\b0\/100/);
+  });
+
+  test('detail view shows each score with label, quote context and top drivers', () => {
     const card = makeCard();
     const out = formatTrustHuman({ kind: 'detail', card, market: card.markets[0], verbose: false });
     expect(out).toContain('KX-EVT-A');
     expect(out).toContain('(primary)');
-    // Each of the six score keys appears
-    expect(out).toContain('Trust');
+    // Each of the four score keys appears
+    expect(out).toContain('Quality');
     expect(out).toContain('Liquidity');
     expect(out).toContain('Move');
-    expect(out).toContain('Avoid');
-    expect(out).toContain('Quote');
     expect(out).toContain('Resol');
-    // Driver names present
-    expect(out).toContain('depth_score');
-    expect(out).toContain('spread_pp');
-    expect(out).toContain('fill_consistency');
-    // Risk-metric annotation on market_avoid / quote_risk
-    expect(out).toContain('risk metric');
-    // point_in_time → "as of report time" annotation
-    expect(out).toContain('as of report time');
+    // Quote context from the card, in cents
+    expect(out).toContain('Fair 53¢');
+    expect(out).toContain('Spread 1¢');
+    // Drivers are pre-rendered strings
+    expect(out).toContain('24h traded notional $4,090');
     // Evidence is NOT shown without --verbose
     expect(out).not.toContain('Evidence:');
   });
 
-  test('detail view with --verbose surfaces evidence + confidence + freshness', () => {
+  test('fractional cents keep one decimal', () => {
+    const card = makeCard();
+    const out = formatTrustHuman({ kind: 'detail', card, market: card.markets[1], verbose: false });
+    expect(out).toContain('Fair 21.2¢');
+  });
+
+  test('detail view with --verbose surfaces evidence + confidence', () => {
     const card = makeCard();
     const out = formatTrustHuman({ kind: 'detail', card, market: card.markets[0], verbose: true });
     expect(out).toContain('Evidence:');
-    expect(out).toContain('avg_spread_cents: 1.2');
+    expect(out).toContain('avg_spread_cents: 1.2 (24h)');
+    // Evidence without a metric falls back to its text
+    expect(out).toContain('Light trading: under $2,000 in 24h');
     expect(out).toContain('Confidence: high');
-    expect(out).toContain('Freshness: point_in_time');
+  });
+});
+
+describe('real v1.14 payload (KXNVDAA-28JANHEAD)', () => {
+  const card = JSON.parse(
+    readFileSync(new URL('./fixtures/trader-trust-v1.14.json', import.meta.url), 'utf8'),
+  ) as TraderTrustCard;
+
+  test('table view renders without throwing', () => {
+    const out = formatTrustHuman({ kind: 'table', card, event_name: null });
+    expect(out).toContain('Event quality 58 (Weak)');
+    expect(out).toContain('6/6 markets scored');
+    expect(out).toContain('KXNVDAA-28JANHEAD-56000');
+  });
+
+  test('detail view of a market with a not-applicable move score', () => {
+    const market = card.markets.find((m) => m.market_ticker === 'KXNVDAA-28JANHEAD-46000')!;
+    const out = formatTrustHuman({ kind: 'detail', card, market, verbose: true });
+    expect(out).toContain('No trading in 7d');
+    expect(out).toContain('(not applicable)');
+    expect(out).toContain('Fair 96.1¢');
+    expect(out).toContain('Light recent trading');
   });
 });
