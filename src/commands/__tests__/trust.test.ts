@@ -216,16 +216,22 @@ describe('formatTrustHuman', () => {
     expect(out).toMatch(/Higher is better/i);
   });
 
-  test('table sorted by liquidity desc', () => {
+  test('table sorted by market quality desc', () => {
     const card = makeCard();
-    // Make B have higher liquidity than A
-    card.markets[0].scores.liquidity.value = 30;
-    card.markets[1].scores.liquidity.value = 90;
+    // Make B have higher quality than A
+    card.markets[0].scores.market_quality.value = 30;
+    card.markets[1].scores.market_quality.value = 90;
     const out = formatTrustHuman({ kind: 'table', card, event_name: null });
     const aIdx = out.indexOf('KX-EVT-A');
     const bIdx = out.indexOf('KX-EVT-B');
     expect(bIdx).toBeGreaterThan(0);
     expect(bIdx).toBeLessThan(aIdx);
+  });
+
+  test('table omits the Liquidity column (it duplicates Quality)', () => {
+    const out = formatTrustHuman({ kind: 'table', card: makeCard(), event_name: null });
+    expect(out).toContain('Quality');
+    expect(out).not.toContain('Liquidity');
   });
 
   test('a null score renders as em dash, never as zero', () => {

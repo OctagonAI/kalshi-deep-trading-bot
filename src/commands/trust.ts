@@ -188,16 +188,20 @@ function formatTrustTable(card: TraderTrustCard, eventName: string | null): stri
   lines.push(`  Calculation ${card.calculation_version}  ·  Computed ${card.computed_at.slice(0, 16).replace('T', ' ')} UTC`);
   lines.push('');
 
-  // Sort by liquidity desc (unscored last); the most active markets surface first.
-  const liq = (m: TrustMarket) => m.scores?.liquidity?.value ?? -1;
-  const sorted = card.markets.slice().sort((a, b) => liq(b) - liq(a));
+  // market_quality mirrors liquidity unless a cap lowers it, so the table shows
+  // only the composite; the detail card still breaks out all four scores.
+  const tableKeys = SCORE_KEYS.filter((k) => k !== 'liquidity');
 
-  const headers = ['', 'Market', 'Title', ...SCORE_KEYS.map((k) => SCORE_HEADER_LABELS[k])];
+  // Sort by market quality desc (unscored last); the best markets surface first.
+  const quality = (m: TrustMarket) => m.scores?.market_quality?.value ?? -1;
+  const sorted = card.markets.slice().sort((a, b) => quality(b) - quality(a));
+
+  const headers = ['', 'Market', 'Title', ...tableKeys.map((k) => SCORE_HEADER_LABELS[k])];
   const rows: string[][] = sorted.map((m) => [
     m.is_primary ? '*' : ' ',
     m.market_ticker,
     truncate(m.title, 30),
-    ...SCORE_KEYS.map((k) => colorScore(m.scores?.[k]?.value)),
+    ...tableKeys.map((k) => colorScore(m.scores?.[k]?.value)),
   ]);
   lines.push(formatTable(headers, rows));
   lines.push('');
